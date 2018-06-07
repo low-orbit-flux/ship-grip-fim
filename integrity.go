@@ -1,5 +1,5 @@
 /*
-   - Usage section
+   
    - config files and hardcoded values
 	 - parameters for report name, etc
 	 - database and table are hardcoded
@@ -140,8 +140,6 @@ func parallelFileCheck( fileMap *SafeFileMap, paraCount int, path string) {
   }
   wg.Wait()
 
-  //fmt.Printf("\n\n")
-
 	for _, file := range allFilesList {
     fileMap.mux.Lock()
 		fmt.Printf("%v %v\n", fileMap.v[file], file)
@@ -169,8 +167,6 @@ type FileHash struct {
 }
 
 
-
-//func saveToDB(fileMap *SafeFileMap, sdf string){
 func saveToDB(reportName string, host string, path string, fileMap *SafeFileMap){
 	fileMap.mux.Lock()
 
@@ -295,14 +291,50 @@ func compareReports(reportID1 string, reportID2 string){
 
 }
 
+func usage() {
+	usageString := `
+Usage:
+    integrity scan <path>
+    integrity list
+    integrity data <ID>
+    integrity compare <ID> <ID>
+
+    scan - This will take a checksum of every file in the specified directory.
+           This is done for all files recursively.  The results are written
+           to the database.
+
+    list - This will list out all reports in the database.
+
+    data - This will dump all of the data entries from a given report.  The
+           data consists of path / checksum pairs.
+
+    compare - This will compare the checksum for each file in two different
+              reports.  If a checksum has changed, it will be shown.  If a
+              file is missing, it will be shown.  The ID for the older report
+              is listed first, then the ID for the newer report.
+
+
+
+	`
+	fmt.Printf(usageString)
+	log.Fatal("Exiting ...")
+}
+
 
 func main() {
 
 //db.integrity.find({ "data./home/user1/test/test6": { $exists : true}},{"data./home/user1/test/test6":1})
 //db.integrity.find({ "data./home/user1/test/test9\.php": { $exists : true}},{"data./home/user1/test/test9\.php":1})
 
+    if(len(os.Args) < 2){
+	    usage()
+    }
+
     switch os.Args[1] {
 		case "scan":
+			if(len(os.Args) != 3){
+				usage()
+			}
         fileMap := SafeFileMap{v: make(map[string]string)}
         parallelFileCheck(&fileMap, 8, os.Args[2])
         saveToDB("adhoc report 1", "duck-puppy", "/storage1", &fileMap)
@@ -313,11 +345,16 @@ func main() {
 			*/
 			  listReports()
 			case "data":
+				if(len(os.Args) != 3){
+					usage()
+				}
 				listReportData(os.Args[2])
 			case "compare":
+				if(len(os.Args) != 4){
+					usage()
+				}
 				compareReports(os.Args[2], os.Args[3])
 		default:
-			fmt.Printf("nothing selected ...\n")
-			fmt.Printf("Usage:  scan <path>, list, data <ID>, compare <ID> <ID>\n")
+			usage()
     }
 }
