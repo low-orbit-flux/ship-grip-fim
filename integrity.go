@@ -1,17 +1,26 @@
 /*
-   - comparing reports
+   - Usage section
    - config files and hardcoded values
-   - some files don't get md5 sums
+	 - parameters for report name, etc
+	 - database and table are hardcoded
+
    - should variables stay global?
-   - database and table are hardcoded
+
 	 - do something about trailing slashes when paths ar concatenated
+
    - figure out the newest and second newest reports
+	     - automatically check for changes in last two runs
+			 - do this for last two runs with same report name
+			    (ex: so only reports with name "nightly scheduled" will be compared and not "adhoc report" )
 	 - daemon the schedules runs
 	     - schedule runs, save reports
 	     - have alerts ( email, etc.)
 	 - GUI
 	 - daemon status viewer
 	 - report viewer
+
+	 - not searching for new files for efficiency,
+	 				maybe think about this later as an option
 */
 
 package main
@@ -256,12 +265,32 @@ func compareReports(reportID1 string, reportID2 string){
   c := session.DB("integrity").C("fileHash")
 
   var fileHashes []FileHash
-	err = c.Find(bson.M{"reportID": bson.ObjectIdHex(reportID)}).All(&fileHashes)
+	err = c.Find(bson.M{"reportID": bson.ObjectIdHex(reportID1)}).All(&fileHashes)
   if err != nil {
     log.Print(err)
   }
+
+
+		session2, err2 := mgo.Dial("localhost")
+	  if err2 != nil {
+	    log.Print(err2)
+	  }
+	  defer session2.Close()
+	  c2 := session2.DB("integrity").C("fileHash")
+
 	for _, line := range fileHashes {
-		fmt.Printf("%v\n", line)
+		var fh []FileHash
+		err = c2.Find(bson.M{"reportID": bson.ObjectIdHex(reportID2), "filePath": line.FilePath }).All(&fh)
+		if err2 != nil {
+			log.Print(err)
+		}
+
+		switch {
+		case len(fh) <= 0:
+			    fmt.Printf("\n\nERROR - missing file: %v\n\n", line.FilePath)
+		case line.Hash != fh[0].Hash:
+		      fmt.Printf("\n\nERROR - hashes don't match: %v\n%v\n%v\n\n", line.FilePath, line.Hash, fh[0].Hash)
+	  }
 	}
 
 }
@@ -286,7 +315,7 @@ func main() {
 			case "data":
 				listReportData(os.Args[2])
 			case "compare":
-				compareReports()
+				compareReports(os.Args[2], os.Args[3])
 		default:
 			fmt.Printf("nothing selected ...\n")
 			fmt.Printf("Usage:  scan <path>, list, data <ID>, compare <ID> <ID>\n")
