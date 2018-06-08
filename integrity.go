@@ -1,6 +1,4 @@
 /*
-
-
 	 - do something about trailing slashes when paths ar concatenated
 
    - Auto Compare
