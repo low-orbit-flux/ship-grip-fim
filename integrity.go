@@ -1,6 +1,5 @@
 /*
 	 - do something about trailing slashes when paths ar concatenated
-
    - Auto Compare
 	     - figure out the newest and second newest reports
 	     - automatically check for changes in last two runs
