@@ -1,10 +1,6 @@
 /*
 
    - config files and hardcoded values
-	 - parameters for report name, etc
-	 - database and table are hardcoded
-
-   - should variables stay global?
 
 	 - do something about trailing slashes when paths ar concatenated
 
@@ -34,6 +30,8 @@ import (
 	"os"
 	"sync"
   "time"
+	"regexp"
+	"strconv"
 
   //"goji.io"
 //"goji.io/pat"
@@ -329,11 +327,60 @@ Usage:
 
 func main() {
 
+
+
+/*
+    Hardcoded settings, these will be used if there are no args and nothing
+		is found in the config file.
+*/
+
 	  reportName := "default adhoc report"
 	  host := "duck-puppy"
   	path := "/storage1"
-
+    paraCount := 8
     d := DBConnect{databaseHost: "localhost",	database: "integrity",	reportCollection: "report",	fileHashCollection: "fileHash"}
+
+/*
+    Read settings from config file
+		- these may be overridden by any commandline args
+*/
+ 		configData, err := ioutil.ReadFile("integrity.conf")
+    if err != nil {
+        log.Fatal(err)
+    }
+    cf := string(configData)
+
+    re1, err := regexp.Compile(`(reportName)="(.*)"`)
+    r := re1.FindAllStringSubmatch(cf, -1)
+    reportName = r[0][2]
+
+		re1, err = regexp.Compile(`(host)="(.*)"`)
+    r = re1.FindAllStringSubmatch(cf, -1)
+    host = r[0][2]
+
+		re1, err = regexp.Compile(`(path)="(.*)"`)
+    r = re1.FindAllStringSubmatch(cf, -1)
+    path = r[0][2]
+
+		re1, err = regexp.Compile(`(paraCount)="(.*)"`)
+		r = re1.FindAllStringSubmatch(cf, -1)
+		paraCount, err = strconv.Atoi(r[0][2])
+
+		re1, err = regexp.Compile(`(databaseHost)="(.*)"`)
+		r = re1.FindAllStringSubmatch(cf, -1)
+		d.databaseHost = r[0][2]
+
+		re1, err = regexp.Compile(`(database)="(.*)"`)
+		r = re1.FindAllStringSubmatch(cf, -1)
+		d.database = r[0][2]
+
+		re1, err = regexp.Compile(`(reportCollection)="(.*)"`)
+		r = re1.FindAllStringSubmatch(cf, -1)
+		d.reportCollection = r[0][2]
+
+		re1, err = regexp.Compile(`(fileHashCollection)="(.*)"`)
+		r = re1.FindAllStringSubmatch(cf, -1)
+		d.fileHashCollection = r[0][2]
 
     if(len(os.Args) < 2){
 	    usage()
@@ -341,11 +388,12 @@ func main() {
 
     switch os.Args[1] {
 		case "scan":
-			if(len(os.Args) != 3){
-				usage()
-			}
+		if(len(os.Args) >= 3){
+			path = os.Args[2] // override this
+		}
+
         fileMap := SafeFileMap{v: make(map[string]string)}
-        parallelFileCheck(&fileMap, 8, os.Args[2])
+        parallelFileCheck(&fileMap, paraCount, path)
         saveToDB(reportName, host, path, &fileMap, d)
 			case "list":
 			/*
