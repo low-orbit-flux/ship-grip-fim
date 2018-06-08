@@ -1,10 +1,10 @@
 /*
 
-   - config files and hardcoded values
 
 	 - do something about trailing slashes when paths ar concatenated
 
-   - figure out the newest and second newest reports
+   - Auto Compare
+	     - figure out the newest and second newest reports
 	     - automatically check for changes in last two runs
 			 - do this for last two runs with same report name
 			    (ex: so only reports with name "nightly scheduled" will be compared and not "adhoc report" )
@@ -17,6 +17,8 @@
 
 	 - not searching for new files for efficiency,
 	 				maybe think about this later as an option
+
+	 - ctime, atime etc
 */
 
 package main
