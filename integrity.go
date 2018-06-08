@@ -1,5 +1,5 @@
 /*
-   
+
    - config files and hardcoded values
 	 - parameters for report name, etc
 	 - database and table are hardcoded
@@ -42,6 +42,35 @@ import (
 
 )
 
+
+
+
+type SafeFileMap struct {
+  v   map[string]string
+  mux sync.Mutex
+}
+type Report struct {
+	  Id bson.ObjectId `json:"id" bson:"_id,omitempty"`
+		ReportName     string `json:"reportName" bson:"reportName"`
+		Host    string `json:"host" bson:"host"`
+		Path    string `json:"path" bson:"path"`
+		Date    string `json:"date" bson:"date"`
+		//Data    map[string]string `json:"data" bson:"data"`
+}
+type FileHash struct {
+	  Id bson.ObjectId `json:"id" bson:"_id,omitempty"`
+	  ReportID bson.ObjectId `json:"reportID" bson:"reportID"`
+		FilePath    string `json:"filePath" bson:"filePath"`
+		Hash    string `json:"hash" bson:"hash"`
+}
+type DBConnect struct {
+    databaseHost string
+		database string
+		reportCollection string
+		fileHashCollection string
+}
+
+
 func sumFile(file string) string {
 	f, err := os.Open(file)
 	if err != nil {
@@ -79,7 +108,7 @@ func walkFiles(dir string, allFilesList *[]string) {
 	}
 }
 
-func checkFiles(allFilesList *[]string, fileMap *SafeFileMap ) {
+func checkFiles(allFilesList *[]string, fileMap *SafeFileMap, wg *sync.WaitGroup ) {
 
 	defer wg.Done()
 	for _, file := range *allFilesList {
@@ -95,14 +124,10 @@ func checkFiles(allFilesList *[]string, fileMap *SafeFileMap ) {
 
 }
 
-type SafeFileMap struct {
-  v   map[string]string
-  mux sync.Mutex
-}
-
-var wg sync.WaitGroup // should this stay global ????
 
 func parallelFileCheck( fileMap *SafeFileMap, paraCount int, path string) {
+
+  var wg sync.WaitGroup
 
 	allFilesList := make([]string, 0, 10)
 
@@ -117,7 +142,7 @@ func parallelFileCheck( fileMap *SafeFileMap, paraCount int, path string) {
   //fmt.Printf("%v\n",len(allFilesList))
   for i := 0; i < paraCount; i++ {
     aPart := allFilesList[splitS:splitE]
-    go checkFiles(&aPart, fileMap)   // process a slice
+    go checkFiles(&aPart, fileMap, &wg)   // process a slice
     //fmt.Printf("%v %v\n", splitS, splitE)
     splitS = splitE
     splitE += splitIncrement
@@ -150,36 +175,19 @@ func parallelFileCheck( fileMap *SafeFileMap, paraCount int, path string) {
 }
 
 
-
-type Report struct {
-	  Id bson.ObjectId `json:"id" bson:"_id,omitempty"`
-		ReportName     string `json:"reportName" bson:"reportName"`
-		Host    string `json:"host" bson:"host"`
-		Path    string `json:"path" bson:"path"`
-		Date    string `json:"date" bson:"date"`
-		//Data    map[string]string `json:"data" bson:"data"`
-}
-type FileHash struct {
-	  Id bson.ObjectId `json:"id" bson:"_id,omitempty"`
-	  ReportID bson.ObjectId `json:"reportID" bson:"reportID"`
-		FilePath    string `json:"filePath" bson:"filePath"`
-		Hash    string `json:"hash" bson:"hash"`
-}
-
-
-func saveToDB(reportName string, host string, path string, fileMap *SafeFileMap){
+func saveToDB(reportName string, host string, path string, fileMap *SafeFileMap, d DBConnect){
 	fileMap.mux.Lock()
 
-  session, err := mgo.Dial("localhost")
+  session, err := mgo.Dial(d.databaseHost)
   if err != nil {
     log.Print(err)
   }
   defer session.Close()
-  c := session.DB("integrity").C("report")
+  c := session.DB(d.database).C(d.reportCollection)
 
 
   t := time.Now()
-  timeString := t.Format("2006-01-02_15:04:05")
+  timeString := t.Format("2006-01-02_15:04:05") // just format, not hardcoded
 	i := bson.NewObjectId()
   report := &Report{
 		Id: i,
@@ -187,7 +195,6 @@ func saveToDB(reportName string, host string, path string, fileMap *SafeFileMap)
     Host: host,
     Path: path,
     Date: timeString,
-    //Data: fileMap.v,
   }
   err = c.Insert(report)
   if err != nil {
@@ -195,12 +202,12 @@ func saveToDB(reportName string, host string, path string, fileMap *SafeFileMap)
   }
 
 
-	session2, err2 := mgo.Dial("localhost")
+	session2, err2 := mgo.Dial(d.databaseHost)
   if err2 != nil {
     log.Print(err2)
   }
   defer session2.Close()
-  c2 := session2.DB("integrity").C("fileHash")
+  c2 := session2.DB(d.database).C(d.fileHashCollection)
 
   for k, v := range fileMap.v {
 		err2 = c2.Insert(&FileHash{ReportID: i, FilePath: k, Hash: v})
@@ -210,17 +217,16 @@ func saveToDB(reportName string, host string, path string, fileMap *SafeFileMap)
 }
 
 
-func listReports(){
+func listReports(d DBConnect){
 
-  session, err := mgo.Dial("localhost")
+  session, err := mgo.Dial(d.databaseHost)
   if err != nil {
     log.Print(err)
   }
   defer session.Close()
-  c := session.DB("integrity").C("report")
+  c := session.DB(d.database).C(d.reportCollection)
 
   var reportList []Report
-  //err = c.Find(bson.M{}).Select(bson.M{"data":0}).All(&reportList)
 	err = c.Find(bson.M{}).Select(bson.M{"_id":1,"reportName":1,"host":1,"path":1,"date":1}).All(&reportList)
   if err != nil {
     log.Print(err)
@@ -231,14 +237,14 @@ func listReports(){
 
 }
 
-func listReportData(reportID string){
+func listReportData(reportID string, d DBConnect){
 
-  session, err := mgo.Dial("localhost")
+  session, err := mgo.Dial(d.databaseHost)
   if err != nil {
     log.Print(err)
   }
   defer session.Close()
-  c := session.DB("integrity").C("fileHash")
+  c := session.DB(d.database).C(d.fileHashCollection)
 
   var fileHashes []FileHash
 	err = c.Find(bson.M{"reportID": bson.ObjectIdHex(reportID)}).All(&fileHashes)
@@ -252,13 +258,13 @@ func listReportData(reportID string){
 }
 
 
-func compareReports(reportID1 string, reportID2 string){
-	session, err := mgo.Dial("localhost")
+func compareReports(reportID1 string, reportID2 string, d DBConnect){
+	session, err := mgo.Dial(d.databaseHost)
   if err != nil {
     log.Print(err)
   }
   defer session.Close()
-  c := session.DB("integrity").C("fileHash")
+  c := session.DB(d.database).C(d.fileHashCollection)
 
   var fileHashes []FileHash
 	err = c.Find(bson.M{"reportID": bson.ObjectIdHex(reportID1)}).All(&fileHashes)
@@ -267,12 +273,12 @@ func compareReports(reportID1 string, reportID2 string){
   }
 
 
-		session2, err2 := mgo.Dial("localhost")
+		session2, err2 := mgo.Dial(d.databaseHost)
 	  if err2 != nil {
 	    log.Print(err2)
 	  }
 	  defer session2.Close()
-	  c2 := session2.DB("integrity").C("fileHash")
+	  c2 := session2.DB(d.database).C(d.fileHashCollection)
 
 	for _, line := range fileHashes {
 		var fh []FileHash
@@ -323,8 +329,11 @@ Usage:
 
 func main() {
 
-//db.integrity.find({ "data./home/user1/test/test6": { $exists : true}},{"data./home/user1/test/test6":1})
-//db.integrity.find({ "data./home/user1/test/test9\.php": { $exists : true}},{"data./home/user1/test/test9\.php":1})
+	  reportName := "default adhoc report"
+	  host := "duck-puppy"
+  	path := "/storage1"
+
+    d := DBConnect{databaseHost: "localhost",	database: "integrity",	reportCollection: "report",	fileHashCollection: "fileHash"}
 
     if(len(os.Args) < 2){
 	    usage()
@@ -337,23 +346,23 @@ func main() {
 			}
         fileMap := SafeFileMap{v: make(map[string]string)}
         parallelFileCheck(&fileMap, 8, os.Args[2])
-        saveToDB("adhoc report 1", "duck-puppy", "/storage1", &fileMap)
+        saveToDB(reportName, host, path, &fileMap, d)
 			case "list":
 			/*
 			 - need to compare two reports
 			          - parallelize this
 			*/
-			  listReports()
+			  listReports(d)
 			case "data":
 				if(len(os.Args) != 3){
 					usage()
 				}
-				listReportData(os.Args[2])
+				listReportData(os.Args[2], d)
 			case "compare":
 				if(len(os.Args) != 4){
 					usage()
 				}
-				compareReports(os.Args[2], os.Args[3])
+				compareReports(os.Args[2], os.Args[3], d)
 		default:
 			usage()
     }
