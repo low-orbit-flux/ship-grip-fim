@@ -300,10 +300,10 @@ func compareReports(reportID1 string, reportID2 string, d DBConnect){
 func usage() {
 	usageString := `
 Usage:
-    integrity scan <path>
-    integrity list
-    integrity data <ID>
-    integrity compare <ID> <ID>
+    ship-grip-fim scan <path>
+    ship-grip-fim list
+    ship-grip-fim data <ID>
+    ship-grip-fim compare <ID> <ID>
 
     scan - This will take a checksum of every file in the specified directory.
            This is done for all files recursively.  The results are written
