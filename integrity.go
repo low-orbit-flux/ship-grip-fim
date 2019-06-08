@@ -31,6 +31,7 @@ import (
   "time"
 	"regexp"
 	"strconv"
+	"strings"
 
   //"goji.io"
 //"goji.io/pat"
@@ -255,7 +256,9 @@ func listReportData(reportID string, d DBConnect){
 }
 
 
-func compareReports(reportID1 string, reportID2 string, d DBConnect){
+func compareReports(reportID1 string, reportID2 string, swapPath1 string, swapPath2 string, d DBConnect){
+
+  /* DB connection 1 */
 	session, err := mgo.Dial(d.databaseHost)
   if err != nil {
     log.Print(err)
@@ -263,35 +266,79 @@ func compareReports(reportID1 string, reportID2 string, d DBConnect){
   defer session.Close()
   c := session.DB(d.database).C(d.fileHashCollection)
 
+	/*
+	  - get first report from DB
+		  - query based on: report ID 1
+		  - save in: fileHashes
+	*/
+	fmt.Printf("\nLoading first cache...\n\n")
   var fileHashes []FileHash
 	err = c.Find(bson.M{"reportID": bson.ObjectIdHex(reportID1)}).All(&fileHashes)
   if err != nil {
     log.Print(err)
   }
 
+  /* DB connection 2	*/
+  session2, err2 := mgo.Dial(d.databaseHost)
+  if err2 != nil {
+    log.Print(err2)
+  }
+  defer session2.Close()
+  c2 := session2.DB(d.database).C(d.fileHashCollection)
 
-		session2, err2 := mgo.Dial(d.databaseHost)
-	  if err2 != nil {
-	    log.Print(err2)
-	  }
-	  defer session2.Close()
-	  c2 := session2.DB(d.database).C(d.fileHashCollection)
-
-	for _, line := range fileHashes {
-		var fh []FileHash
-		err = c2.Find(bson.M{"reportID": bson.ObjectIdHex(reportID2), "filePath": line.FilePath }).All(&fh)
-		if err2 != nil {
-			log.Print(err)
+  /*
+	  - get second report from DB
+		  - query based on: report ID 2
+		  - save in: fileHashes2
+  */
+	fmt.Printf("\nLoading second cache...\n\n")
+	var fileHashes2 []FileHash
+	/*  fileHashesMap does not exist */
+  var fileHashesMap2 map[string]string = make(map[string]string)
+	err = c2.Find(bson.M{"reportID": bson.ObjectIdHex(reportID2)}).All(&fileHashes2)
+  if err != nil {
+    log.Print(err)
+  }
+	/* convert to a map, so we can quickly / easily search */
+	fmt.Printf("\nConverting second cache to a map...\n\n")
+	for _, i := range fileHashes2 {
+		if( swapPath1 == "" || swapPath2 == "") {
+			fileHashesMap2[i.FilePath] = i.Hash
+		} else {
+			/* swap out base path so both filesystem or directory names match */
+			hold := i.FilePath
+			hold = strings.Replace(hold, swapPath1, swapPath2, 1)
+			fileHashesMap2[hold] = i.Hash
 		}
-
-		switch {
-		case len(fh) <= 0:
-			    fmt.Printf("\n\nERROR - missing file: %v\n\n", line.FilePath)
-		case line.Hash != fh[0].Hash:
-		      fmt.Printf("\n\nERROR - hashes don't match: %v\n%v\n%v\n\n", line.FilePath, line.Hash, fh[0].Hash)
-	  }
 	}
 
+  /*
+	  - loop over fileHashes (from query 1)
+		    - check for a match for each file in fileHashesMap2
+  */
+	fmt.Println(len(fileHashes))
+	fmt.Println(len(fileHashes2))
+	fmt.Println(len(fileHashesMap2))
+	
+	fmt.Printf("\nComparing...\n\n")
+  for _, line := range fileHashes {
+		/*
+		DON'T DO THIS ANY MORE, IT WAS WAY TOO SLOW:
+    err = c2.Find(bson.M{"reportID": bson.ObjectIdHex(reportID2), "filePath": line.FilePath }).All(&fh)
+    if err2 != nil {
+      log.Print(err)
+    }
+    */
+
+		if val, ok := fileHashesMap2[line.FilePath]; ok {
+		  if line.Hash != val {
+			  fmt.Printf("ERROR - hashes don't match: %v\n%v\n%v\n", line.FilePath, line.Hash, val)
+			}
+    }	else {
+      fmt.Printf("ERROR - missing file: %v\n", line.FilePath)
+		}
+  }
+	fmt.Printf("\n[Completed]\n\n")
 }
 
 func usage() {
@@ -301,6 +348,7 @@ Usage:
     ship-grip-fim list
     ship-grip-fim data <ID>
     ship-grip-fim compare <ID> <ID>
+		ship-grip-fim compare <ID> <ID> <path1> <path2>
 
     scan - This will take a checksum of every file in the specified directory.
            This is done for all files recursively.  The results are written
@@ -314,7 +362,9 @@ Usage:
     compare - This will compare the checksum for each file in two different
               reports.  If a checksum has changed, it will be shown.  If a
               file is missing, it will be shown.  The ID for the older report
-              is listed first, then the ID for the newer report.
+              is listed first, then the ID for the newer report.  If two paths
+							are passed, they will be used to change the prefix for all of the
+							paths form the newer report; path2 replaces path1.
 
 
 
@@ -392,6 +442,7 @@ func main() {
 		}
 
         fileMap := SafeFileMap{v: make(map[string]string)}
+				fmt.Printf("ParaCount: %v",paraCount)
         parallelFileCheck(&fileMap, paraCount, path)
         saveToDB(reportName, host, path, &fileMap, d)
 			case "list":
@@ -406,10 +457,15 @@ func main() {
 				}
 				listReportData(os.Args[2], d)
 			case "compare":
-				if(len(os.Args) != 4){
+				if(len(os.Args) != 4 && len(os.Args) != 6){
 					usage()
 				}
-				compareReports(os.Args[2], os.Args[3], d)
+				if(len(os.Args) == 4){
+				    compareReports(os.Args[2], os.Args[3], "", "", d)
+			  }
+				if(len(os.Args) == 6){
+						compareReports(os.Args[2], os.Args[3], os.Args[4], os.Args[5], d)
+				}
 		default:
 			usage()
     }
