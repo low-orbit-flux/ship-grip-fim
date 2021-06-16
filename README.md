@@ -1,8 +1,6 @@
 Integrity
 
-
-/*
-	 - do something about trailing slashes when paths ar concatenated
+   - do something about trailing slashes when paths ar concatenated
    - Auto Compare
 	     - figure out the newest and second newest reports
 	     - automatically check for changes in last two runs
@@ -19,4 +17,3 @@ Integrity
 	 				maybe think about this later as an option
 
 	 - ctime, atime etc
-*/

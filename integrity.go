@@ -1,25 +1,12 @@
-
-
 package main
 
 import (
-	"crypto/md5"
 	"fmt"
-	"io"
 	"io/ioutil"
-	"log"
+	"log"	
 	"os"
-	"sync"
-  "time"
 	"regexp"
 	"strconv"
-	"strings"
-
-  //"goji.io"
-//"goji.io/pat"
-"gopkg.in/mgo.v2"
-"gopkg.in/mgo.v2/bson"
-
 )
 
 
@@ -31,7 +18,7 @@ Usage:
     ship-grip-fim list
     ship-grip-fim data <ID>
     ship-grip-fim compare <ID> <ID>
-		ship-grip-fim compare <ID> <ID> <path1> <path2>
+    ship-grip-fim compare <ID> <ID> <path1> <path2>
 
     scan - This will take a checksum of every file in the specified directory.
            This is done for all files recursively.  The results are written
@@ -46,8 +33,8 @@ Usage:
               reports.  If a checksum has changed, it will be shown.  If a
               file is missing, it will be shown.  The ID for the older report
               is listed first, then the ID for the newer report.  If two paths
-							are passed, they will be used to change the prefix for all of the
-							paths form the newer report; path2 replaces path1.
+              are passed, they will be used to change the prefix for all of the
+              paths form the newer report; path2 replaces path1.
 
 
 

@@ -1,5 +1,5 @@
 package main
-
+/*
 import (
 	"crypto/md5"
 	"fmt"
@@ -19,4 +19,4 @@ import (
 "gopkg.in/mgo.v2/bson"
 
 )
-
+*/
