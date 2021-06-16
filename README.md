@@ -1,5 +1,13 @@
 Integrity
 
+New todo items ( 2021 )
+
+    - comparison reports should be saved to a DB 
+    - switch between data types
+
+
+Old todo items (  years ago ):
+
    - do something about trailing slashes when paths ar concatenated
    - Auto Compare
 	     - figure out the newest and second newest reports

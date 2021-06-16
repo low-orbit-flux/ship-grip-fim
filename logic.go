@@ -41,12 +41,7 @@ type SafeFileMap struct {
 		  FilePath    string `json:"filePath" bson:"filePath"`
 		  Hash    string `json:"hash" bson:"hash"`
   }
-  type DBConnect struct {
-	  databaseHost string
-		  database string
-		  reportCollection string
-		  fileHashCollection string
-  }
+
   
   
   func sumFile(file string) string {
@@ -101,9 +96,9 @@ type SafeFileMap struct {
   
   
   }
+
   
-  
-  func parallelFileCheck( fileMap *SafeFileMap, paraCount int, path string) {
+func parallelFileCheck( fileMap *SafeFileMap, paraCount int, path string) {
   
 	var wg sync.WaitGroup
   
@@ -153,132 +148,23 @@ type SafeFileMap struct {
   }
   
   
-  func saveToDB(reportName string, host string, path string, fileMap *SafeFileMap, d DBConnect){
-	  fileMap.mux.Lock()
-  
-	session, err := mgo.Dial(d.databaseHost)
-	if err != nil {
-	  log.Print(err)
-	}
-	defer session.Close()
-	c := session.DB(d.database).C(d.reportCollection)
+
+
+
   
   
-	t := time.Now()
-	timeString := t.Format("2006-01-02_15:04:05") // just format, not hardcoded
-	  i := bson.NewObjectId()
-	report := &Report{
-		  Id: i,
-	  ReportName: reportName,
-	  Host: host,
-	  Path: path,
-	  Date: timeString,
-	}
-	err = c.Insert(report)
-	if err != nil {
-	  log.Print(err)
-	}
+
+
+  func compareReports(reportID1 string, reportID2 string, swapPath1 string, swapPath2 string){
   
-  
-	  session2, err2 := mgo.Dial(d.databaseHost)
-	if err2 != nil {
-	  log.Print(err2)
-	}
-	defer session2.Close()
-	c2 := session2.DB(d.database).C(d.fileHashCollection)
-  
-	for k, v := range fileMap.v {
-		  err2 = c2.Insert(&FileHash{ReportID: i, FilePath: k, Hash: v})
-	  }
-  
-	fileMap.mux.Unlock()
-  }
-  
-  
-  func listReports(d DBConnect){
-  
-	session, err := mgo.Dial(d.databaseHost)
-	if err != nil {
-	  log.Print(err)
-	}
-	defer session.Close()
-	c := session.DB(d.database).C(d.reportCollection)
-  
-	var reportList []Report
-	  err = c.Find(bson.M{}).Select(bson.M{"_id":1,"reportName":1,"host":1,"path":1,"date":1}).All(&reportList)
-	if err != nil {
-	  log.Print(err)
-	}
-	  for _, report := range reportList {
-		  fmt.Printf("%v\n", report)
-	  }
-  
-  }
-  
-  func listReportData(reportID string, d DBConnect){
-  
-	session, err := mgo.Dial(d.databaseHost)
-	if err != nil {
-	  log.Print(err)
-	}
-	defer session.Close()
-	c := session.DB(d.database).C(d.fileHashCollection)
-  
-	var fileHashes []FileHash
-	  err = c.Find(bson.M{"reportID": bson.ObjectIdHex(reportID)}).All(&fileHashes)
-	if err != nil {
-	  log.Print(err)
-	}
-	  for _, line := range fileHashes {
-		  fmt.Printf("%v\n", line)
-	  }
-  
-  }
-  
-  
-  func compareReports(reportID1 string, reportID2 string, swapPath1 string, swapPath2 string, d DBConnect){
-  
-	/* DB connection 1 */
-	  session, err := mgo.Dial(d.databaseHost)
-	if err != nil {
-	  log.Print(err)
-	}
-	defer session.Close()
-	c := session.DB(d.database).C(d.fileHashCollection)
-  
-	  /*
-		- get first report from DB
-			- query based on: report ID 1
-			- save in: fileHashes
-	  */
-	  fmt.Printf("\nLoading first cache...\n\n")
-	var fileHashes []FileHash
-	  err = c.Find(bson.M{"reportID": bson.ObjectIdHex(reportID1)}).All(&fileHashes)
-	if err != nil {
-	  log.Print(err)
-	}
-  
-	/* DB connection 2	*/
-	session2, err2 := mgo.Dial(d.databaseHost)
-	if err2 != nil {
-	  log.Print(err2)
-	}
-	defer session2.Close()
-	c2 := session2.DB(d.database).C(d.fileHashCollection)
-  
-	/*
-		- get second report from DB
-			- query based on: report ID 2
-			- save in: fileHashes2
-	*/
-	  fmt.Printf("\nLoading second cache...\n\n")
-	  var fileHashes2 []FileHash
+	var fileHashes []FileHash    
+    var fileHashes2 []FileHash
 	  /*  fileHashesMap does not exist */
 	var fileHashesMap2 map[string]string = make(map[string]string)
-	  err = c2.Find(bson.M{"reportID": bson.ObjectIdHex(reportID2)}).All(&fileHashes2)
-	if err != nil {
-	  log.Print(err)
-	}
+
+	compareReportsData(reportID1, reportID2, fileHashes, fileHashes2)
+
+
 	  /* convert to a map, so we can quickly / easily search */
 	  fmt.Printf("\nConverting second cache to a map...\n\n")
 	  for _, i := range fileHashes2 {
@@ -302,14 +188,6 @@ type SafeFileMap struct {
 	  
 	  fmt.Printf("\nComparing...\n\n")
 	for _, line := range fileHashes {
-		  /*
-		  DON'T DO THIS ANY MORE, IT WAS WAY TOO SLOW:
-	  err = c2.Find(bson.M{"reportID": bson.ObjectIdHex(reportID2), "filePath": line.FilePath }).All(&fh)
-	  if err2 != nil {
-		log.Print(err)
-	  }
-	  */
-  
 		  if val, ok := fileHashesMap2[line.FilePath]; ok {
 			if line.Hash != val {
 				fmt.Printf("ERROR - hashes don't match: %v\n%v\n%v\n", line.FilePath, line.Hash, val)
@@ -320,3 +198,4 @@ type SafeFileMap struct {
 	}
 	  fmt.Printf("\n[Completed]\n\n")
   }
+  

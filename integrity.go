@@ -53,11 +53,11 @@ func main() {
 		is found in the config file.
 */
 
-	  reportName := "default adhoc report"
-	  host := "duck-puppy"
+    reportName := "default adhoc report"
+    host := "duck-puppy"
   	path := "/storage1"
     paraCount := 8
-    d := DBConnect{databaseHost: "localhost",	database: "integrity",	reportCollection: "report",	fileHashCollection: "fileHash"}
+	dataSource = "file"  // default
 
 /*
     Read settings from config file
@@ -131,10 +131,10 @@ func main() {
 					usage()
 				}
 				if(len(os.Args) == 4){
-				    compareReports(os.Args[2], os.Args[3], "", "", d)
+				    compareReports(os.Args[2], os.Args[3], "", "")
 			  }
 				if(len(os.Args) == 6){
-						compareReports(os.Args[2], os.Args[3], os.Args[4], os.Args[5], d)
+						compareReports(os.Args[2], os.Args[3], os.Args[4], os.Args[5])
 				}
 		default:
 			usage()
