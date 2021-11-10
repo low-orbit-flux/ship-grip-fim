@@ -8,16 +8,11 @@ import (
 	"log"
 	"os"
 	"sync"
-  "time"
 	//"regexp"
 	//"strconv"
 	"strings"
-
   //"goji.io"
 //"goji.io/pat"
-"gopkg.in/mgo.v2"
-"gopkg.in/mgo.v2/bson"
-
 )
 
 

@@ -1,7 +1,7 @@
 package main
 
 
-func compareReportsDataMongo(reportID1 string, reportID2 string)([]FileHash,[]FileHash){
+func compareReportsDataFile(reportID1 string, reportID2 string)([]FileHash,[]FileHash){
   
 	d := DBConnect{databaseHost: "localhost",	database: "integrity",	reportCollection: "report",	fileHashCollection: "fileHash"}
 	
