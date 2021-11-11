@@ -8,9 +8,9 @@ import (
 
 type DBConnect struct {
 	databaseHost string
-		database string
-		reportCollection string
-		fileHashCollection string
+	database string
+	reportCollection string
+	fileHashCollection string
 }
 
 
@@ -26,11 +26,11 @@ func saveToDB(reportName string, host string, path string, fileMap *SafeFileMap,
   c := session.DB(d.database).C(d.reportCollection)
 
 
-  t := time.Now()
-  timeString := t.Format("2006-01-02_15:04:05") // just format, not hardcoded
-	i := bson.NewObjectId()
-  report := &Report{
-		Id: i,
+    t := time.Now()
+    timeString := t.Format("2006-01-02_15:04:05") // just format, not hardcoded
+    i := bson.NewObjectId()
+    report := &Report{
+	Id: i,
 	ReportName: reportName,
 	Host: host,
 	Path: path,
@@ -109,8 +109,6 @@ func compareReportsData(reportID1 string, reportID2 string)([]FileHash,[]FileHas
 	} else {
 		fileHashes, fileHashes2 = compareReportsDataFile()
 	}
-
-	
 
 	return fileHashes, fileHashes2
 }

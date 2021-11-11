@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"bufio"
+	"io"
 	"io/ioutil"
 	"log"	
 	"os"
@@ -63,7 +65,7 @@ func main() {
     Read settings from config file
 		- these may be overridden by any commandline args
 */
- 		configData, err := ioutil.ReadFile("integrity.conf")
+ 	configData, err := ioutil.ReadFile("integrity.conf")
     if err != nil {
         log.Fatal(err)
     }
@@ -73,33 +75,37 @@ func main() {
     r := re1.FindAllStringSubmatch(cf, -1)
     reportName = r[0][2]
 
-		re1, err = regexp.Compile(`(host)="(.*)"`)
+	re1, err = regexp.Compile(`(host)="(.*)"`)
     r = re1.FindAllStringSubmatch(cf, -1)
     host = r[0][2]
 
-		re1, err = regexp.Compile(`(path)="(.*)"`)
+	re1, err = regexp.Compile(`(path)="(.*)"`)
     r = re1.FindAllStringSubmatch(cf, -1)
     path = r[0][2]
 
-		re1, err = regexp.Compile(`(paraCount)="(.*)"`)
-		r = re1.FindAllStringSubmatch(cf, -1)
-		paraCount, err = strconv.Atoi(r[0][2])
+	re1, err = regexp.Compile(`(reportDir)="(.*)"`)
+    r = re1.FindAllStringSubmatch(cf, -1)
+    reportDir = r[0][2]
+	
+	re1, err = regexp.Compile(`(paraCount)="(.*)"`)
+	r = re1.FindAllStringSubmatch(cf, -1)
+	paraCount, err = strconv.Atoi(r[0][2])
 
-		re1, err = regexp.Compile(`(databaseHost)="(.*)"`)
-		r = re1.FindAllStringSubmatch(cf, -1)
-		d.databaseHost = r[0][2]
+	re1, err = regexp.Compile(`(databaseHost)="(.*)"`)
+	r = re1.FindAllStringSubmatch(cf, -1)
+	d.databaseHost = r[0][2]
 
-		re1, err = regexp.Compile(`(database)="(.*)"`)
-		r = re1.FindAllStringSubmatch(cf, -1)
-		d.database = r[0][2]
+	re1, err = regexp.Compile(`(database)="(.*)"`)
+	r = re1.FindAllStringSubmatch(cf, -1)
+	d.database = r[0][2]
 
-		re1, err = regexp.Compile(`(reportCollection)="(.*)"`)
-		r = re1.FindAllStringSubmatch(cf, -1)
-		d.reportCollection = r[0][2]
+	re1, err = regexp.Compile(`(reportCollection)="(.*)"`)
+	r = re1.FindAllStringSubmatch(cf, -1)
+	d.reportCollection = r[0][2]
 
-		re1, err = regexp.Compile(`(fileHashCollection)="(.*)"`)
-		r = re1.FindAllStringSubmatch(cf, -1)
-		d.fileHashCollection = r[0][2]
+	re1, err = regexp.Compile(`(fileHashCollection)="(.*)"`)
+	r = re1.FindAllStringSubmatch(cf, -1)
+	d.fileHashCollection = r[0][2]
 
     if(len(os.Args) < 2){
 	    usage()
@@ -107,35 +113,35 @@ func main() {
 
     switch os.Args[1] {
 		case "scan":
-		if(len(os.Args) >= 3){
-			path = os.Args[2] // override this
-		}
+	    	if(len(os.Args) >= 3){
+		    	path = os.Args[2] // override this
+		    }
 
-        fileMap := SafeFileMap{v: make(map[string]string)}
-				fmt.Printf("ParaCount: %v",paraCount)
-        parallelFileCheck(&fileMap, paraCount, path)
-        saveToDB(reportName, host, path, &fileMap, d)
-			case "list":
+            fileMap := SafeFileMap{v: make(map[string]string)}
+			fmt.Printf("ParaCount: %v",paraCount)
+            parallelFileCheck(&fileMap, paraCount, path)
+            saveToDB(reportName, host, path, &fileMap, d)
+		case "list":
 			/*
 			 - need to compare two reports
 			          - parallelize this
 			*/
-			  listReports(d)
-			case "data":
-				if(len(os.Args) != 3){
-					usage()
-				}
-				listReportData(os.Args[2], d)
-			case "compare":
-				if(len(os.Args) != 4 && len(os.Args) != 6){
-					usage()
-				}
-				if(len(os.Args) == 4){
-				    compareReports(os.Args[2], os.Args[3], "", "")
-			  }
-				if(len(os.Args) == 6){
-						compareReports(os.Args[2], os.Args[3], os.Args[4], os.Args[5])
-				}
+			listReports(d)
+		case "data":
+			if(len(os.Args) != 3){
+				usage()
+			}
+			listReportData(os.Args[2], d)
+		case "compare":
+			if(len(os.Args) != 4 && len(os.Args) != 6){
+				usage()
+			}
+			if(len(os.Args) == 4){
+			    compareReports(os.Args[2], os.Args[3], "", "")
+			}
+			if(len(os.Args) == 6){
+				compareReports(os.Args[2], os.Args[3], os.Args[4], os.Args[5])
+		    }
 		default:
 			usage()
     }

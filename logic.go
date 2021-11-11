@@ -140,57 +140,50 @@ func parallelFileCheck( fileMap *SafeFileMap, paraCount int, path string) {
 	  }
 	  fmt.Printf("\nNumber of files found: %v", len(allFilesList))
 	  fmt.Printf("\nNumber of files checked: %v\n", len(fileMap.v))
-  }
-  
-  
+}
+    
 
 
-
-  
-  
-
-
-  func compareReports(reportID1 string, reportID2 string, swapPath1 string, swapPath2 string){
-  
+func compareReports(reportID1 string, reportID2 string, swapPath1 string, swapPath2 string){ 
 	var fileHashes []FileHash    
     var fileHashes2 []FileHash
-	  /*  fileHashesMap does not exist */
+	/*  fileHashesMap does not exist */
 	var fileHashesMap2 map[string]string = make(map[string]string)
 
 	compareReportsData(reportID1, reportID2, fileHashes, fileHashes2)
 
 
-	  /* convert to a map, so we can quickly / easily search */
-	  fmt.Printf("\nConverting second cache to a map...\n\n")
-	  for _, i := range fileHashes2 {
-		  if( swapPath1 == "" || swapPath2 == "") {
-			  fileHashesMap2[i.FilePath] = i.Hash
-		  } else {
-			  /* swap out base path so both filesystem or directory names match */
-			  hold := i.FilePath
-			  hold = strings.Replace(hold, swapPath1, swapPath2, 1)
-			  fileHashesMap2[hold] = i.Hash
-		  }
-	  }
+	/* convert to a map, so we can quickly / easily search */
+	fmt.Printf("\nConverting second cache to a map...\n\n")
+	for _, i := range fileHashes2 {
+		if( swapPath1 == "" || swapPath2 == "") {
+		    fileHashesMap2[i.FilePath] = i.Hash
+		} else {
+		    /* swap out base path so both filesystem or directory names match */
+			hold := i.FilePath
+			hold = strings.Replace(hold, swapPath1, swapPath2, 1)
+			fileHashesMap2[hold] = i.Hash
+		}
+	}
   
 	/*
 		- loop over fileHashes (from query 1)
 			  - check for a match for each file in fileHashesMap2
 	*/
-	  fmt.Println(len(fileHashes))
-	  fmt.Println(len(fileHashes2))
-	  fmt.Println(len(fileHashesMap2))
+	fmt.Println(len(fileHashes))
+	fmt.Println(len(fileHashes2))
+	fmt.Println(len(fileHashesMap2))
 	  
-	  fmt.Printf("\nComparing...\n\n")
+	fmt.Printf("\nComparing...\n\n")
 	for _, line := range fileHashes {
-		  if val, ok := fileHashesMap2[line.FilePath]; ok {
+		if val, ok := fileHashesMap2[line.FilePath]; ok {
 			if line.Hash != val {
 				fmt.Printf("ERROR - hashes don't match: %v\n%v\n%v\n", line.FilePath, line.Hash, val)
-			  }
-	  }	else {
-		fmt.Printf("ERROR - missing file: %v\n", line.FilePath)
-		  }
+			}
+	    }	else {
+		    fmt.Printf("ERROR - missing file: %v\n", line.FilePath)
+		}
 	}
-	  fmt.Printf("\n[Completed]\n\n")
-  }
+	fmt.Printf("\n[Completed]\n\n")
+}
   

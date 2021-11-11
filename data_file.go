@@ -9,9 +9,26 @@ func compareReportsDataFile(reportID1 string, reportID2 string)([]FileHash,[]Fil
     var fileHashes2 []FileHash
 
 	fmt.Printf("\nLoading first cache...\n\n")
-    // Read from a file here <==============================
+    data1, err := ioutil.ReadFile(reportDir + "/" + reportID1)
+    if err != nil {
+          log.Fatal(err)
+    }
+	lines1 := strings.Split(data1,"\n")
+    for i, v := range lines1 {
+		lines1 := strings.Split(v,":")
+		//fileHashes[0] = ????
+		//
+		//   Load everything to a hash map for both DBS 
+		//   Remove the part in logic.go that converts these
+		
+	}
+
+
 	fmt.Printf("\nLoading second cache...\n\n")
-	// Read from a file here <==============================
+
+	//
+	//  do the same for the second cache
+	//
 
 	return fileHashes, fileHashes2
 }
