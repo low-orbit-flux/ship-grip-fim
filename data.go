@@ -1,9 +1,11 @@
 package main
 
 import (
-	"log"
+	//"log"
+	"fmt"
 )
 
+/*
 
 
 type DBConnect struct {
@@ -14,102 +16,44 @@ type DBConnect struct {
 }
 
 
-
-func saveToDB(reportName string, host string, path string, fileMap *SafeFileMap, d DBConnect){
-	fileMap.mux.Lock()
-
-  session, err := mgo.Dial(d.databaseHost)
-  if err != nil {
-	log.Print(err)
-  }
-  defer session.Close()
-  c := session.DB(d.database).C(d.reportCollection)
+*/
 
 
-    t := time.Now()
-    timeString := t.Format("2006-01-02_15:04:05") // just format, not hardcoded
-    i := bson.NewObjectId()
-    report := &Report{
-	Id: i,
-	ReportName: reportName,
-	Host: host,
-	Path: path,
-	Date: timeString,
-  }
-  err = c.Insert(report)
-  if err != nil {
-	log.Print(err)
-  }
-
-
-	session2, err2 := mgo.Dial(d.databaseHost)
-  if err2 != nil {
-	log.Print(err2)
-  }
-  defer session2.Close()
-  c2 := session2.DB(d.database).C(d.fileHashCollection)
-
-  for k, v := range fileMap.v {
-		err2 = c2.Insert(&FileHash{ReportID: i, FilePath: k, Hash: v})
-	}
-
-  fileMap.mux.Unlock()
-}
-
-
-func listReports(d DBConnect){
-
-  session, err := mgo.Dial(d.databaseHost)
-  if err != nil {
-	log.Print(err)
-  }
-  defer session.Close()
-  c := session.DB(d.database).C(d.reportCollection)
-
-  var reportList []Report
-	err = c.Find(bson.M{}).Select(bson.M{"_id":1,"reportName":1,"host":1,"path":1,"date":1}).All(&reportList)
-  if err != nil {
-	log.Print(err)
-  }
-	for _, report := range reportList {
-		fmt.Printf("%v\n", report)
+func saveToDB(reportName string, host string, path string, fileMap *SafeFileMap, dataSource string){
+	if dataSource == "file" {	
+		saveToDBFile(reportName, host, path, fileMap)
+	}else {
+		fmt.Printf("ERROR - no valid data source specified")
 	}
 
 }
 
-func listReportData(reportID string, d DBConnect){
 
-  session, err := mgo.Dial(d.databaseHost)
-  if err != nil {
-	log.Print(err)
-  }
-  defer session.Close()
-  c := session.DB(d.database).C(d.fileHashCollection)
+func listReports( dataSource string){
+	if dataSource == "file" {	
+		listReportsFile()
+	}else {
+		fmt.Printf("ERROR - no valid data source specified")
+	}
+}
 
-  var fileHashes []FileHash
-	err = c.Find(bson.M{"reportID": bson.ObjectIdHex(reportID)}).All(&fileHashes)
-  if err != nil {
-	log.Print(err)
-  }
-	for _, line := range fileHashes {
-		fmt.Printf("%v\n", line)
+
+
+func listReportData(reportName string, dataSource string){
+	if dataSource == "file" {	
+		listReportDataFile(reportName)
+	}else {
+		fmt.Printf("ERROR - no valid data source specified")
 	}
 
 }
 
 
 
-
-func compareReportsData(reportID1 string, reportID2 string)([]FileHash,[]FileHash){
-  
-	d := DBConnect{databaseHost: "localhost",	database: "integrity",	reportCollection: "report",	fileHashCollection: "fileHash"}
-
-	if( dataSource == "mongo" ) {
-		fileHashes, fileHashes2 = compareReportsDataMongo()
+func compareReportsData(oldReportName string, newReportName string, oldReport map[string]string, newReport map[string]string, dataSource string){
+	if( dataSource == "file" ) {
+		compareReportsDataFile(oldReportName, newReportName, oldReport, newReport)
 	} else {
-		fileHashes, fileHashes2 = compareReportsDataFile()
+		fmt.Printf("ERROR - no valid data source specified")
 	}
-
-	return fileHashes, fileHashes2
 }
-  

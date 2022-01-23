@@ -2,8 +2,8 @@ package main
 
 import (
 	"fmt"
-	"bufio"
-	"io"
+	//"bufio"
+	//"io"
 	"io/ioutil"
 	"log"	
 	"os"
@@ -45,6 +45,11 @@ Usage:
 	log.Fatal("Exiting ...")
 }
 
+/*
+    Global hardcoded settings, these will be used if there are no args and nothing
+		is found in the config file.
+*/
+var reportDir = "~/integirty_reports"
 
 func main() {
 
@@ -55,11 +60,11 @@ func main() {
 		is found in the config file.
 */
 
-    reportName := "default adhoc report"
+    reportName := "default_adhoc_report"
     host := "duck-puppy"
   	path := "/storage1"
+	dataSource := "file"  // default
     paraCount := 8
-	dataSource = "file"  // default
 
 /*
     Read settings from config file
@@ -87,25 +92,15 @@ func main() {
     r = re1.FindAllStringSubmatch(cf, -1)
     reportDir = r[0][2]
 	
+	re1, err = regexp.Compile(`(dataSource)="(.*)"`)
+	r = re1.FindAllStringSubmatch(cf, -1)
+	dataSource = r[0][2]
+
 	re1, err = regexp.Compile(`(paraCount)="(.*)"`)
 	r = re1.FindAllStringSubmatch(cf, -1)
 	paraCount, err = strconv.Atoi(r[0][2])
 
-	re1, err = regexp.Compile(`(databaseHost)="(.*)"`)
-	r = re1.FindAllStringSubmatch(cf, -1)
-	d.databaseHost = r[0][2]
 
-	re1, err = regexp.Compile(`(database)="(.*)"`)
-	r = re1.FindAllStringSubmatch(cf, -1)
-	d.database = r[0][2]
-
-	re1, err = regexp.Compile(`(reportCollection)="(.*)"`)
-	r = re1.FindAllStringSubmatch(cf, -1)
-	d.reportCollection = r[0][2]
-
-	re1, err = regexp.Compile(`(fileHashCollection)="(.*)"`)
-	r = re1.FindAllStringSubmatch(cf, -1)
-	d.fileHashCollection = r[0][2]
 
     if(len(os.Args) < 2){
 	    usage()
@@ -116,33 +111,33 @@ func main() {
 	    	if(len(os.Args) >= 3){
 		    	path = os.Args[2] // override this
 		    }
-
             fileMap := SafeFileMap{v: make(map[string]string)}
 			fmt.Printf("ParaCount: %v",paraCount)
             parallelFileCheck(&fileMap, paraCount, path)
-            saveToDB(reportName, host, path, &fileMap, d)
-		case "list":
-			/*
-			 - need to compare two reports
-			          - parallelize this
-			*/
-			listReports(d)
+			fmt.Printf("test %s, %s, %s",reportName, host, path, reportDir, dataSource)
+            saveToDB(reportName, host, path, &fileMap, dataSource)
+			
+		case "list":	
+			listReports(dataSource)
+			
 		case "data":
 			if(len(os.Args) != 3){
 				usage()
 			}
-			listReportData(os.Args[2], d)
+			listReportData(os.Args[2], dataSource)
+			
 		case "compare":
 			if(len(os.Args) != 4 && len(os.Args) != 6){
 				usage()
 			}
 			if(len(os.Args) == 4){
-			    compareReports(os.Args[2], os.Args[3], "", "")
+			    compareReports(os.Args[2], os.Args[3], "", "", dataSource)
 			}
 			if(len(os.Args) == 6){
-				compareReports(os.Args[2], os.Args[3], os.Args[4], os.Args[5])
+				compareReports(os.Args[2], os.Args[3], os.Args[4], os.Args[5], dataSource)
 		    }
 		default:
 			usage()
+
     }
 }
