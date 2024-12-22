@@ -126,11 +126,11 @@ func parallelFileCheck( fileMap *SafeFileMap, paraCount int, path string) {
 	fmt.Printf("\nNumber of files checked: %v\n", len(fileMap.v))
 }
     
-func compareReports(oldReportName string, newReportName string, swapPath1 string, swapPath2 string, dataSource string){ 
+func compareReports(oldReportName string, newReportName string, swapPath1 string, swapPath2 string){ 
 	oldReport := make(map[string]string)
 	newReport := make(map[string]string)  
 
-	compareReportsData(oldReportName, newReportName, oldReport, newReport, dataSource)
+	compareReportsData(oldReportName, newReportName, oldReport, newReport)
 
 	fmt.Printf("\nBoth caches loaded...\n\n")
 	//fmt.Println("map:", oldReport)

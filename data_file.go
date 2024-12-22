@@ -48,14 +48,17 @@ func saveToDBFile(reportName string, host string, path string, fileMap *SafeFile
 }
 
 
-func listReportsFile(){
+func listReportsFile()(string){
+	output := ""
     f, err := ioutil.ReadDir(reportDir)
     if err != nil {
         panic(err)
     }
     for _, i := range f {
         fmt.Println(i.Name())
+		output += i.Name() + "\n"
     } 
+	return output
 }
 
 

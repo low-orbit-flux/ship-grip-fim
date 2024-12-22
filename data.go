@@ -19,7 +19,7 @@ type DBConnect struct {
 */
 
 
-func saveToDB(reportName string, host string, path string, fileMap *SafeFileMap, dataSource string){
+func saveToDB(reportName string, host string, path string, fileMap *SafeFileMap){
 	if dataSource == "file" {	
 		saveToDBFile(reportName, host, path, fileMap)
 	}else {
@@ -29,17 +29,20 @@ func saveToDB(reportName string, host string, path string, fileMap *SafeFileMap,
 }
 
 
-func listReports( dataSource string){
+func listReports()(string){
+	output := ""
 	if dataSource == "file" {	
-		listReportsFile()
+		output += listReportsFile()
 	}else {
 		fmt.Printf("ERROR - no valid data source specified")
+		output += "ERROR - no valid data source specified"
 	}
+	return output
 }
 
 
 
-func listReportData(reportName string, dataSource string){
+func listReportData(reportName string){
 	if dataSource == "file" {	
 		listReportDataFile(reportName)
 	}else {
@@ -50,7 +53,7 @@ func listReportData(reportName string, dataSource string){
 
 
 
-func compareReportsData(oldReportName string, newReportName string, oldReport map[string]string, newReport map[string]string, dataSource string){
+func compareReportsData(oldReportName string, newReportName string, oldReport map[string]string, newReport map[string]string){
 	if( dataSource == "file" ) {
 		compareReportsDataFile(oldReportName, newReportName, oldReport, newReport)
 	} else {

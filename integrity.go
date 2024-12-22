@@ -50,6 +50,7 @@ Usage:
 		is found in the config file.
 */
 var reportDir = "~/integirty_reports"
+var dataSource = "file"  
 
 func main() {
 
@@ -63,7 +64,6 @@ func main() {
     reportName := "default_adhoc_report"
     host := "duck-puppy"
   	path := "/storage1"
-	dataSource := "file"  // default
     paraCount := 8
 
 /*
@@ -114,28 +114,30 @@ func main() {
             fileMap := SafeFileMap{v: make(map[string]string)}
 			fmt.Printf("ParaCount: %v",paraCount)
             parallelFileCheck(&fileMap, paraCount, path)
-			fmt.Printf("test %s, %s, %s",reportName, host, path, reportDir, dataSource)
-            saveToDB(reportName, host, path, &fileMap, dataSource)
+			fmt.Printf("test %s, %s, %s",reportName, host, path, reportDir)
+            saveToDB(reportName, host, path, &fileMap)
 			
 		case "list":	
-			listReports(dataSource)
+			listReports()
 			
 		case "data":
 			if(len(os.Args) != 3){
 				usage()
 			}
-			listReportData(os.Args[2], dataSource)
+			listReportData(os.Args[2])
 			
 		case "compare":
 			if(len(os.Args) != 4 && len(os.Args) != 6){
 				usage()
 			}
 			if(len(os.Args) == 4){
-			    compareReports(os.Args[2], os.Args[3], "", "", dataSource)
+			    compareReports(os.Args[2], os.Args[3], "", "")
 			}
 			if(len(os.Args) == 6){
-				compareReports(os.Args[2], os.Args[3], os.Args[4], os.Args[5], dataSource)
+				compareReports(os.Args[2], os.Args[3], os.Args[4], os.Args[5])
 		    }
+		case "server":
+		    startServer()
 		default:
 			usage()
 
