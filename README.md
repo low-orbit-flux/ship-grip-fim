@@ -2,33 +2,40 @@ Integrity
 
 
     - ignore list ( ex. exclude .DS_Store )
+	- include headers in compare reports ( need quick query in data lib )
 	- print header when reading report or comparing reports
+	- TEST - optional swap path variables for report comparison
+		    - ???? do something about trailing slashes when paths are concatenated
 
+    Service ( agent )
+	    - CLI can connect to service ( all normal functionality )
+		- option to save reports locally
+		- CLI can have a server list
+		- CLI can start service on host
+		- Check status/connectivity of all services
+		- bulk request
 
-	- run as daemon with scheduled reports
-		- add alerts ( email and send to ship grip alert system )
-		- scheudle / view runs
+	
 	GUI
-		- Wrap cli
+	    - duplicate CLI functionality ( include connect to server )
 
-	Schedule	
+    Schedule	
+	    - schedule defined on agent side so it will run even if control server doesn't watch it
 		- view running jobs ( 1 per host at a time )
 		- schedule jobs ( don't run if running )
 		- view scheduled
 
+	Alerts
+		- add alerts ( email and send to ship grip alert system )
 
-   - Auto Compare
+    Auto Compare
 	     - figure out the newest and second newest reports
 	     - automatically check for changes in last two runs
 			 - do this for last two runs with same report name
 			    (ex: so only reports with name "nightly scheduled" will be compared and not "adhoc report" )
 
-	 - daemon status viewer
-	 - report viewer
+    - One report / table combining multiple reports from differenet hosts ( newest from each )
 
-
-	- TEST - optional swap path variables for report comparison
-		    - ???? do something about trailing slashes when paths are concatenated
     - compare should also be parallel
 	- search single file accross reports
 	- ctime, atime etc
