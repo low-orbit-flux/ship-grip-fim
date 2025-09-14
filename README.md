@@ -1,5 +1,8 @@
 Integrity
 
+
+- ignore list
+
 New todo items ( 2021 )
 
     - comparison reports should be saved to a DB 

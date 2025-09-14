@@ -12,11 +12,11 @@ import (
 func saveToDBFile(reportName string, host string, path string, fileMap *SafeFileMap){
 	fileMap.mux.Lock()
 
-	fileinfo, e1 := os.Stat(reportDir)
-	fmt.Print(fileinfo)
+	_, e1 := os.Stat(reportDir)
     if os.IsNotExist(e1) {
     	err := os.Mkdir(reportDir, 0755)
         if err != nil {
+            fmt.Print("\n\n\n\nERROR - Can't create report dir.\n\n\n\n")
             panic(err)
         }
 	}
@@ -52,7 +52,11 @@ func listReportsFile()(string){
 	output := ""
     f, err := ioutil.ReadDir(reportDir)
     if err != nil {
-        panic(err)
+        fmt.Println("\n\n\n============================================\n")
+        fmt.Println("Empty, no reports or other error, see below.\n")
+        fmt.Println("============================================\n\n\n")
+        fmt.Println(err)
+        fmt.Println("\n--------------------------------------------\n\n\n")
     }
     for _, i := range f {
         fmt.Println(i.Name())

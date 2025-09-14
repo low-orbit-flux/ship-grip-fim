@@ -20,7 +20,7 @@ Usage:
     ship-grip-fim list
     ship-grip-fim data <ID>
     ship-grip-fim compare <ID> <ID>
-    ship-grip-fim compare <ID> <ID> <path1> <path2>
+    ship-grip-fim compare <ID> <ID> <path1> <path2>    ( in case base path changed )
 
     scan - This will take a checksum of every file in the specified directory.
            This is done for all files recursively.  The results are written
@@ -112,10 +112,10 @@ func main() {
 		    	path = os.Args[2] // override this
 		    }
             fileMap := SafeFileMap{v: make(map[string]string)}
-			fmt.Printf("ParaCount: %v",paraCount)
+			fmt.Printf("ParaCount: %v\n\n",paraCount)
             parallelFileCheck(&fileMap, paraCount, path)
-			fmt.Printf("test %s, %s, %s",reportName, host, path, reportDir)
-            saveToDB(reportName, host, path, &fileMap)
+			fmt.Printf("test %s, %s, %s, %s",reportName, host, path, reportDir)
+		    saveToDB(reportName, host, path, &fileMap)
 			
 		case "list":	
 			listReports()

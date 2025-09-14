@@ -136,15 +136,19 @@ func compareReports(oldReportName string, newReportName string, swapPath1 string
 	//fmt.Println("map:", oldReport)
 	//fmt.Println("map:", newReport)
 
-	for k, v := range newReport {
-		if v2, ok := oldReport[k]; ok {
+	for k, v := range oldReport {
+		if v2, ok := newReport[k]; ok {
 			if v2 != v {
 				fmt.Printf("ERROR - hashes don't match: %v  %v  %v\n", k, v2, v)
 			}
+			delete(newReport, k)           // delete, anything left is a newly found file
 		} else {
 			fmt.Printf("ERROR - missing file: %v\n", k)
 		}
     }
+	for k, v := range newReport {
+		fmt.Printf("NEW FILE: %v - %v\n", k, v)
+	}
 	fmt.Printf("\n[Completed]\n\n")
 
 /*
