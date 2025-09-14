@@ -131,3 +131,38 @@ func compareReportsDataFile(oldReportName string, newReportName string, oldRepor
         panic(err)
     }
 }
+
+
+func saveCompareFile(reportName string, compareReport map[string]string){
+	_, e1 := os.Stat(reportDir)
+    if os.IsNotExist(e1) {
+    	err := os.Mkdir(reportDir, 0755)
+        if err != nil {
+            fmt.Print("\n\n\n\nERROR - Can't create report dir.\n\n\n\n")
+            panic(err)
+        }
+	}
+
+    t := time.Now()
+    timeString := t.Format("2006-01-02_15:04:05") // just format, not hardcoded
+    /* header
+	f, err := os.OpenFile(reportDir + "/" + reportName + "__" + timeString, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0600)
+	if err != nil {
+		panic(err)
+	}
+	defer f.Close()
+	if _, err = f.WriteString(reportName + "," + host + "," + path + "," + timeString + "\n"); err != nil {
+		panic(err)
+	}
+    */
+	f2, err := os.OpenFile(reportDir + "/" + reportName + "__" + timeString, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
+	if err != nil {
+		panic(err)
+	}
+	defer f2.Close()
+	for k, v := range compareReport {
+		if _, err = f2.WriteString(v + "," + k + "\n"); err != nil {
+			panic(err)
+		}
+	}
+}

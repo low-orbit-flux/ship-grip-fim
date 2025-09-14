@@ -60,3 +60,12 @@ func compareReportsData(oldReportName string, newReportName string, oldReport ma
 		fmt.Printf("ERROR - no valid data source specified")
 	}
 }
+
+
+func saveCompare(reportName string, compareReport map[string]string){
+	if dataSource == "file" {	
+		saveCompareFile(reportName, compareReport)
+	}else {
+		fmt.Printf("ERROR - no valid data source specified")
+	}
+}

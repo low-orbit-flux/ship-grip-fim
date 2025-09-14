@@ -1,16 +1,14 @@
 Integrity
 
 
-- ignore list
+    - ignore list ( ex. exclude .DS_Store )
 
-New todo items ( 2021 )
 
     - comparison reports should be saved to a DB 
     - compare should also be parallel
 	- print header when reading report or comparing reports
 	- option to just print header
-	- how is white space in a file name handled
-	- clean up CLi / add options ( path, etc )
+	
 	- run as daemon with scheduled reports
 		- add alerts ( email and send to ship grip alert system )
 		- scheudle / view runs

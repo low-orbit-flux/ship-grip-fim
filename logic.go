@@ -129,6 +129,7 @@ func parallelFileCheck( fileMap *SafeFileMap, paraCount int, path string) {
 func compareReports(oldReportName string, newReportName string, swapPath1 string, swapPath2 string){ 
 	oldReport := make(map[string]string)
 	newReport := make(map[string]string)  
+	compareReport := make(map[string]string)
 
 	compareReportsData(oldReportName, newReportName, oldReport, newReport)
 
@@ -139,16 +140,22 @@ func compareReports(oldReportName string, newReportName string, swapPath1 string
 	for k, v := range oldReport {
 		if v2, ok := newReport[k]; ok {
 			if v2 != v {
-				fmt.Printf("ERROR - hashes don't match: %v  %v  %v\n", k, v2, v)
+				fmt.Printf("ERROR - hashes don't match: %v  %v  %v\n", k, v, v2)
+				compareReport[k] = "ERROR - hashes don't match: " + v + " " + v2
 			}
 			delete(newReport, k)           // delete, anything left is a newly found file
 		} else {
 			fmt.Printf("ERROR - missing file: %v\n", k)
+			compareReport[k] = "ERROR - missing file: " + k
 		}
     }
 	for k, v := range newReport {
 		fmt.Printf("NEW FILE: %v - %v\n", k, v)
+		compareReport[k] = "NEW FILE: " + k + "," + v
 	}
+
+	compareReportName := "compare__" + oldReportName + "__" + newReportName
+	saveCompare(compareReportName, compareReport)
 	fmt.Printf("\n[Completed]\n\n")
 
 /*
