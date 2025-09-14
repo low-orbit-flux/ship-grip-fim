@@ -2,41 +2,36 @@ Integrity
 
 
     - ignore list ( ex. exclude .DS_Store )
-
-
-    - comparison reports should be saved to a DB 
-    - compare should also be parallel
 	- print header when reading report or comparing reports
-	- option to just print header
-	
+
+
 	- run as daemon with scheduled reports
 		- add alerts ( email and send to ship grip alert system )
 		- scheudle / view runs
-	- GUI
+	GUI
 		- Wrap cli
-		- view jobs
-		- schedule jobs
-	- search single file accross reports
-	- optional swap path variables for report comparison
+
+	Schedule	
+		- view running jobs ( 1 per host at a time )
+		- schedule jobs ( don't run if running )
+		- view scheduled
 
 
-
-
-
-   - do something about trailing slashes when paths are concatenated
    - Auto Compare
 	     - figure out the newest and second newest reports
 	     - automatically check for changes in last two runs
 			 - do this for last two runs with same report name
 			    (ex: so only reports with name "nightly scheduled" will be compared and not "adhoc report" )
-	 - GUI
+
 	 - daemon status viewer
 	 - report viewer
 
-	 - not searching for new files for efficiency,
-	 				maybe think about this later as an option
 
-	 - ctime, atime etc
+	- TEST - optional swap path variables for report comparison
+		    - ???? do something about trailing slashes when paths are concatenated
+    - compare should also be parallel
+	- search single file accross reports
+	- ctime, atime etc
 	 
 
 Build and Run:
