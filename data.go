@@ -18,6 +18,13 @@ type DBConnect struct {
 
 */
 
+type reportHeader struct {
+	name string 
+	time string
+	host string
+	path string
+}
+
 
 func saveToDB(reportName string, host string, path string, fileMap *SafeFileMap){
 	if dataSource == "file" {	
@@ -52,6 +59,15 @@ func listReportData(reportName string){
 }
 
 
+func reportStat(reportName string)(reportHeader){
+	if dataSource == "file" {	
+		return reportStatFile(reportName)
+	}else {
+		fmt.Printf("ERROR - no valid data source specified")
+		return reportHeader{}  // return empty
+	}
+}
+
 
 func compareReportsData(oldReportName string, newReportName string, oldReport map[string]string, newReport map[string]string){
 	if( dataSource == "file" ) {
@@ -62,9 +78,9 @@ func compareReportsData(oldReportName string, newReportName string, oldReport ma
 }
 
 
-func saveCompare(reportName string, compareReport map[string]string){
+func saveCompare(reportName string, oldHeader reportHeader, newHeader reportHeader, compareReport map[string]string){
 	if dataSource == "file" {	
-		saveCompareFile(reportName, compareReport)
+		saveCompareFile(reportName, oldHeader, newHeader, compareReport)
 	}else {
 		fmt.Printf("ERROR - no valid data source specified")
 	}

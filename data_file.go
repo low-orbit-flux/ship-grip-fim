@@ -30,7 +30,7 @@ func saveToDBFile(reportName string, host string, path string, fileMap *SafeFile
 		panic(err)
 	}
 	defer f.Close()
-	if _, err = f.WriteString(reportName + "," + host + "," + path + "," + timeString + "\n"); err != nil {
+	if _, err = f.WriteString(reportName + "," + timeString + "," + host + "," + path + "\n"); err != nil {
 		panic(err)
 	}
 	f2, err := os.OpenFile(reportDir + "/" + reportName + "_" + timeString, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
@@ -83,7 +83,27 @@ func listReportDataFile(reportName string){
     }
 }
 
+func reportStatFile(reportName string)(reportHeader){
 
+    f, err := os.Open(reportDir + "/" + reportName)
+    if err != nil {
+        panic(err)
+    }
+    defer f.Close()
+    s := bufio.NewScanner(f)
+    s.Scan() 
+    h := strings.SplitN(s.Text(),",",4)  // watch for commas in file names
+    rh := reportHeader{}
+    if len(h) >= 4 {
+        rh = reportHeader{ name:h[0], time:h[1], host:h[2], path:h[3]}
+    }else {
+        fmt.Println("Error - header not parsed")
+    }
+    if err := s.Err(); err != nil {
+        panic(err)
+    }
+    return rh
+}
 
 func compareReportsDataFile(oldReportName string, newReportName string, oldReport map[string]string, newReport map[string]string){
   
@@ -133,7 +153,7 @@ func compareReportsDataFile(oldReportName string, newReportName string, oldRepor
 }
 
 
-func saveCompareFile(reportName string, compareReport map[string]string){
+func saveCompareFile(reportName string, oldHeader reportHeader, newHeader reportHeader, compareReport map[string]string){
 	_, e1 := os.Stat(reportDir)
     if os.IsNotExist(e1) {
     	err := os.Mkdir(reportDir, 0755)
@@ -145,16 +165,19 @@ func saveCompareFile(reportName string, compareReport map[string]string){
 
     t := time.Now()
     timeString := t.Format("2006-01-02_15:04:05") // just format, not hardcoded
-    /* header
+
 	f, err := os.OpenFile(reportDir + "/" + reportName + "__" + timeString, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0600)
 	if err != nil {
 		panic(err)
 	}
 	defer f.Close()
-	if _, err = f.WriteString(reportName + "," + host + "," + path + "," + timeString + "\n"); err != nil {
+	if _, err = f.WriteString("Old Header: " + oldHeader.name + "," + oldHeader.time + "," + oldHeader.host + "," + oldHeader.path + "\n"); err != nil {
 		panic(err)
 	}
-    */
+    if _, err = f.WriteString("New Header: " + newHeader.name + "," + newHeader.time + "," + newHeader.host + "," + newHeader.path + "\n"); err != nil {
+		panic(err)
+	}
+    
 	f2, err := os.OpenFile(reportDir + "/" + reportName + "__" + timeString, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
 	if err != nil {
 		panic(err)

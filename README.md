@@ -2,8 +2,6 @@ Integrity
 
 
     - ignore list ( ex. exclude .DS_Store )
-	- include headers in compare reports ( need quick query in data lib )
-	- print header when reading report or comparing reports
 	- TEST - optional swap path variables for report comparison
 		    - ???? do something about trailing slashes when paths are concatenated
 

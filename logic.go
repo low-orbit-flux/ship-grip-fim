@@ -154,9 +154,13 @@ func compareReports(oldReportName string, newReportName string, swapPath1 string
 		compareReport[k] = "NEW FILE: " + k + "," + v
 	}
 
+	oh := reportStatFile(oldReportName)
+	nh := reportStatFile(newReportName)
 	compareReportName := "compare__" + oldReportName + "__" + newReportName
-	saveCompare(compareReportName, compareReport)
+	saveCompare(compareReportName, oh, nh, compareReport)
 	fmt.Printf("\n[Completed]\n\n")
+	
+
 
 /*
 
