@@ -1,13 +1,15 @@
 Integrity
 
 
-    - ignore list ( ex. exclude .DS_Store )
-	- TEST - optional swap path variables for report comparison
-		    - ???? do something about trailing slashes when paths are concatenated
+	- remove base path before compare
+	- check if files are in new files list, note as MOVED in report
+	- ignore list ( ex. exclude .DS_Store )
+    - specify multiple paths to check for report
+	- specify config file as CLI arg
 
     Service ( agent )
 	    - CLI can connect to service ( all normal functionality )
-		- option to save reports locally
+		- option to save reports locally ( sync reports )
 		- CLI can have a server list
 		- CLI can start service on host
 		- Check status/connectivity of all services
