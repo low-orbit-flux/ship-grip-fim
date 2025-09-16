@@ -6,6 +6,7 @@ Integrity
 	- ignore list ( ex. exclude .DS_Store )
     - specify multiple paths to check for report
 	- specify config file as CLI arg
+	- commenting things out in the config file doesn't always work
 
     Service ( agent )
 	    - CLI can connect to service ( all normal functionality )

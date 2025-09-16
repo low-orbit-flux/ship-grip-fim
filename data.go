@@ -69,9 +69,9 @@ func reportStat(reportName string)(reportHeader){
 }
 
 
-func compareReportsData(oldReportName string, newReportName string, oldReport map[string]string, newReport map[string]string){
+func compareReportsData(oldReportName string, newReportName string, oldReport map[string]string, newReport map[string]string, oldHeader reportHeader, newHeader reportHeader, removeBasePath string){
 	if( dataSource == "file" ) {
-		compareReportsDataFile(oldReportName, newReportName, oldReport, newReport)
+		compareReportsDataFile(oldReportName, newReportName, oldReport, newReport, oldHeader, newHeader, removeBasePath)
 	} else {
 		fmt.Printf("ERROR - no valid data source specified")
 	}

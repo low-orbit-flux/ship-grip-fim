@@ -20,7 +20,7 @@ Usage:
     ship-grip-fim list
     ship-grip-fim data <ID>
     ship-grip-fim compare <ID> <ID>
-    ship-grip-fim compare <ID> <ID> <path1> <path2>    ( in case base path changed )
+    ship-grip-fim compare <ID> <ID> yes      ( in case base path changed )
 
     scan - This will take a checksum of every file in the specified directory.
            This is done for all files recursively.  The results are written
@@ -34,9 +34,11 @@ Usage:
     compare - This will compare the checksum for each file in two different
               reports.  If a checksum has changed, it will be shown.  If a
               file is missing, it will be shown.  The ID for the older report
-              is listed first, then the ID for the newer report.  If two paths
-              are passed, they will be used to change the prefix for all of the
-              paths form the newer report; path2 replaces path1.
+              is listed first, then the ID for the newer report.  
+			  
+			  If the fourth param is "yes" the base path will be removed for all files. 
+			  This helps if you file system was moved or mounted somewhere else and you 
+			  still need to check if all files match. 
 
 
 
@@ -127,14 +129,14 @@ func main() {
 			listReportData(os.Args[2])
 			
 		case "compare":
-			if(len(os.Args) != 4 && len(os.Args) != 6){
+			if(len(os.Args) != 4 && len(os.Args) != 5){
 				usage()
 			}
 			if(len(os.Args) == 4){
-			    compareReports(os.Args[2], os.Args[3], "", "")
+			    compareReports(os.Args[2], os.Args[3], "no")  // default "no", don't remove base path
 			}
-			if(len(os.Args) == 6){
-				compareReports(os.Args[2], os.Args[3], os.Args[4], os.Args[5])
+			if(len(os.Args) == 5){
+				compareReports(os.Args[2], os.Args[3], os.Args[4])
 		    }
 		case "server":
 		    startServer()

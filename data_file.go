@@ -84,6 +84,8 @@ func listReportDataFile(reportName string){
 }
 
 func reportStatFile(reportName string)(reportHeader){
+    // could have just returned this info from compareReportsDataFile() but 
+    // nice to have a dedicated function for other purposes
 
     f, err := os.Open(reportDir + "/" + reportName)
     if err != nil {
@@ -105,7 +107,7 @@ func reportStatFile(reportName string)(reportHeader){
     return rh
 }
 
-func compareReportsDataFile(oldReportName string, newReportName string, oldReport map[string]string, newReport map[string]string){
+func compareReportsDataFile(oldReportName string, newReportName string, oldReport map[string]string, newReport map[string]string, oldHeader reportHeader, newHeader reportHeader, removeBasePath string){
   
 
 	fmt.Printf("\nLoading first cache...\n\n")
@@ -116,13 +118,15 @@ func compareReportsDataFile(oldReportName string, newReportName string, oldRepor
     }
     defer f.Close()
     s := bufio.NewScanner(f)
+    s.Scan() // remove header, that we already have .....
     for s.Scan() {
-        fmt.Println(s.Text())
-        lines1 := strings.SplitAfter(s.Text(),",")
+        lines1 := strings.SplitAfterN(s.Text(),",",2)
 		if len(lines1) == 2 {
-            fmt.Println(lines1[0] + "--" + lines1[1])
+            //fmt.Println(lines1[0] + lines1[1])
 			oldReport[lines1[1]] = lines1[0] 
-		}
+		} else {
+            fmt.Println("ERROR - line split in to more or less than 2 cols")
+        }
     }
     if err := s.Err(); err != nil {
         panic(err)
@@ -139,18 +143,47 @@ func compareReportsDataFile(oldReportName string, newReportName string, oldRepor
     }
     defer f2.Close()
     s2 := bufio.NewScanner(f2)
+    s2.Scan() // remove header, that we already have .....
     for s2.Scan() {
-        fmt.Println(s2.Text())
-        lines1 := strings.SplitAfter(s2.Text(),",")
+        lines1 := strings.SplitAfterN(s2.Text(),",",2)
 		if len(lines1) == 2 {
-            fmt.Println(lines1[0] + "--" + lines1[1])
+            //fmt.Println(lines1[0] + lines1[1])
 			newReport[lines1[1]] = lines1[0]
-		} 
+		} else {
+            fmt.Println("ERROR - line split in to more or less than 2 cols")
+        }
     }
     if err := s2.Err(); err != nil {
         panic(err)
     }
+
+    if removeBasePath == "yes" {
+        keys1 := make([]string, 0, len(oldReport))
+        for k := range oldReport {
+            keys1 = append(keys1, k)
+        }
+        keys2 := make([]string, 0, len(newReport))
+        for k := range newReport {
+            keys2 = append(keys2, k)
+        }
+        for _, k := range keys1 {
+            v := oldReport[k]
+            k2 := strings.ReplaceAll(k, oldHeader.path, "")
+            delete(oldReport, k) // do this first (edge case), incase a base path didn't exist and couldn't be removed the keys could be the same ( should never happen though )
+            oldReport[k2] = v
+        }
+        for _, k := range keys2 {
+            v := newReport[k]
+            k2 := strings.ReplaceAll(k, newHeader.path, "")
+            newReport[k2] = v
+            delete(newReport, k)
+        }
+    }
 }
+
+
+
+
 
 
 func saveCompareFile(reportName string, oldHeader reportHeader, newHeader reportHeader, compareReport map[string]string){
