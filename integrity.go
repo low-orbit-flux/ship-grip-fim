@@ -79,29 +79,22 @@ func main() {
     cf := string(configData)
 
     re1, err := regexp.Compile(`(?m)^(reportName)="(.*)"`)
-    r := re1.FindAllStringSubmatch(cf, -1)
-    reportName = r[0][2]
+    if r := re1.FindAllStringSubmatch(cf, -1); r != nil { reportName = r[0][2] }
 
 	re1, err = regexp.Compile(`(?m)^(host)="(.*)"`)
-    r = re1.FindAllStringSubmatch(cf, -1)
-    host = r[0][2]
+    if r := re1.FindAllStringSubmatch(cf, -1); r != nil { host = r[0][2] }
 
 	re1, err = regexp.Compile(`(?m)^(path)="(.*)"`)
-    if r = re1.FindAllStringSubmatch(cf, -1); r != nil {
-        path = r[0][2]
-	}
+    if r := re1.FindAllStringSubmatch(cf, -1); r != nil { path = r[0][2]	}
 
 	re1, err = regexp.Compile(`(?m)^(reportDir)="(.*)"`)
-    r = re1.FindAllStringSubmatch(cf, -1)
-    reportDir = r[0][2]
+    if r := re1.FindAllStringSubmatch(cf, -1); r != nil { reportDir = r[0][2] }
 	
 	re1, err = regexp.Compile(`(?m)^(dataSource)="(.*)"`)
-	r = re1.FindAllStringSubmatch(cf, -1)
-	dataSource = r[0][2]
+	if r := re1.FindAllStringSubmatch(cf, -1); r != nil { dataSource = r[0][2] }
 
 	re1, err = regexp.Compile(`(?m)^(paraCount)="(.*)"`)
-	r = re1.FindAllStringSubmatch(cf, -1)
-	paraCount, err = strconv.Atoi(r[0][2])
+	if r := re1.FindAllStringSubmatch(cf, -1); r != nil { paraCount, err = strconv.Atoi(r[0][2]) }
 
 
 
