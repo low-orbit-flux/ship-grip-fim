@@ -78,27 +78,28 @@ func main() {
     }
     cf := string(configData)
 
-    re1, err := regexp.Compile(`(reportName)="(.*)"`)
+    re1, err := regexp.Compile(`(?m)^(reportName)="(.*)"`)
     r := re1.FindAllStringSubmatch(cf, -1)
     reportName = r[0][2]
 
-	re1, err = regexp.Compile(`(host)="(.*)"`)
+	re1, err = regexp.Compile(`(?m)^(host)="(.*)"`)
     r = re1.FindAllStringSubmatch(cf, -1)
     host = r[0][2]
 
-	re1, err = regexp.Compile(`(path)="(.*)"`)
-    r = re1.FindAllStringSubmatch(cf, -1)
-    path = r[0][2]
+	re1, err = regexp.Compile(`(?m)^(path)="(.*)"`)
+    if r = re1.FindAllStringSubmatch(cf, -1); r != nil {
+        path = r[0][2]
+	}
 
-	re1, err = regexp.Compile(`(reportDir)="(.*)"`)
+	re1, err = regexp.Compile(`(?m)^(reportDir)="(.*)"`)
     r = re1.FindAllStringSubmatch(cf, -1)
     reportDir = r[0][2]
 	
-	re1, err = regexp.Compile(`(dataSource)="(.*)"`)
+	re1, err = regexp.Compile(`(?m)^(dataSource)="(.*)"`)
 	r = re1.FindAllStringSubmatch(cf, -1)
 	dataSource = r[0][2]
 
-	re1, err = regexp.Compile(`(paraCount)="(.*)"`)
+	re1, err = regexp.Compile(`(?m)^(paraCount)="(.*)"`)
 	r = re1.FindAllStringSubmatch(cf, -1)
 	paraCount, err = strconv.Atoi(r[0][2])
 
@@ -113,12 +114,16 @@ func main() {
 	    	if(len(os.Args) >= 3){
 		    	path = os.Args[2] // override this
 		    }
-            fileMap := SafeFileMap{v: make(map[string]string)}
-			fmt.Printf("ParaCount: %v\n\n",paraCount)
-            parallelFileCheck(&fileMap, paraCount, path)
-			fmt.Printf("test %s, %s, %s, %s",reportName, host, path, reportDir)
-		    saveToDB(reportName, host, path, &fileMap)
-			
+			if _, err := os.Stat(path); err != nil {
+				if os.IsNotExist(err) { fmt.Println("ERROR - Directory does not exist")
+				} else { fmt.Println("ERROR - ", err) }
+			} else {
+                fileMap := SafeFileMap{v: make(map[string]string)}
+		    	fmt.Printf("ParaCount: %v\n\n",paraCount)
+                parallelFileCheck(&fileMap, paraCount, path)
+		    	fmt.Printf("test %s, %s, %s, %s",reportName, host, path, reportDir)
+		        saveToDB(reportName, host, path, &fileMap)
+			}
 		case "list":	
 			listReports()
 			

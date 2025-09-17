@@ -1,12 +1,10 @@
 Integrity
 
 
-	- remove base path before compare
-	- check if files are in new files list, note as MOVED in report
 	- ignore list ( ex. exclude .DS_Store )
     - specify multiple paths to check for report
-	- specify config file as CLI arg
 	- commenting things out in the config file doesn't always work
+	- specify config file as CLI arg
 
     Service ( agent )
 	    - CLI can connect to service ( all normal functionality )

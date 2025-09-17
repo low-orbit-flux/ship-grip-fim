@@ -78,7 +78,7 @@ func sumFile(file string) string {
 
   
 func parallelFileCheck( fileMap *SafeFileMap, paraCount int, path string) {
-  
+
 	var wg sync.WaitGroup
   
 	allFilesList := make([]string, 0, 10)

@@ -175,8 +175,8 @@ func compareReportsDataFile(oldReportName string, newReportName string, oldRepor
         for _, k := range keys2 {
             v := newReport[k]
             k2 := strings.ReplaceAll(k, newHeader.path, "")
+            delete(newReport, k) // do this first (edge case), incase a base path didn't exist and couldn't be removed the keys could be the same ( should never happen though )
             newReport[k2] = v
-            delete(newReport, k)
         }
     }
 }
