@@ -78,9 +78,9 @@ func compareReportsData(oldReportName string, newReportName string, oldReport ma
 }
 
 
-func saveCompare(reportName string, oldHeader reportHeader, newHeader reportHeader, compareReport map[string]string){
+func saveCompare(reportName string, oldHeader reportHeader, newHeader reportHeader, cr compareReport){
 	if dataSource == "file" {	
-		saveCompareFile(reportName, oldHeader, newHeader, compareReport)
+		saveCompareFile(reportName, oldHeader, newHeader, cr)
 	}else {
 		fmt.Printf("ERROR - no valid data source specified")
 	}

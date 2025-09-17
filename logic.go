@@ -126,10 +126,35 @@ func parallelFileCheck( fileMap *SafeFileMap, paraCount int, path string) {
 	fmt.Printf("\nNumber of files checked: %v\n", len(fileMap.v))
 }
     
+
+type change struct{
+    path string
+    oldHash string
+	newHash string
+}
+type move struct{
+	oldPath string
+	newPath string
+    hash string
+}
+
+type compareReport struct {
+	newFiles map[string]string
+	missingFiles map[string]string
+	changedFiles []change
+	movedFiles []move
+}
+
 func compareReports(oldReportName string, newReportName string, removeBasePath string, ){ 
 	oldReport := make(map[string]string)
 	newReport := make(map[string]string)  
-	compareReport := make(map[string]string)
+
+	cr := compareReport{
+        newFiles:     make(map[string]string),
+        missingFiles: make(map[string]string),
+        changedFiles: []change{},
+        movedFiles:   []move{},
+    }
 
 	oh := reportStatFile(oldReportName) // old header
 	nh := reportStatFile(newReportName) // new header
@@ -141,22 +166,47 @@ func compareReports(oldReportName string, newReportName string, removeBasePath s
 	for k, v := range oldReport {
 		if v2, ok := newReport[k]; ok {
 			if v2 != v {
-				fmt.Printf("ERROR - hashes don't match: %v  %v  %v\n", k, v, v2)
-				compareReport[k] = "ERROR - hashes don't match: " + v + " " + v2
+				//fmt.Printf("ERROR - hashes don't match: %v  %v  %v\n", k, v, v2)
+				cr.changedFiles = append(cr.changedFiles, change{ path: k, oldHash: v, newHash: v2 })
 			}
 			delete(newReport, k)           // delete, anything left is a newly found file
 		} else {
-			fmt.Printf("ERROR - missing file: %v\n", k)
-			compareReport[k] = "ERROR - missing file: " + k
+			//fmt.Printf("ERROR - missing file: %v\n", k)
+			cr.missingFiles[k] = v
 		}
     }
-	for k, v := range newReport {
-		fmt.Printf("NEW FILE: %v - %v\n", k, v)
-		compareReport[k] = "NEW FILE: " + k + "," + v
+	for k, v := range newReport {                // anything left is new
+		//fmt.Printf("NEW FILE: %v - %v\n", k, v)
+		cr.newFiles[k] = v
 	}
 
+
+
+
+
+
+	for k, v := range cr.missingFiles {
+		for k2, v2 := range cr.newFiles {   // loop entire thing, looking for vals not keys, can't compare by path for this
+            if v == v2 {                    // hashes match
+                cr.movedFiles = append(cr.movedFiles, move{oldPath: k, newPath: k2, hash: v}) // add to moved
+			}
+		}
+
+	
+	}
+	for _, v := range cr.movedFiles{                    // perfer to do it this way for now
+		if _, ok := cr.missingFiles[v.oldPath]; ok {
+            delete(cr.missingFiles, v.oldPath)  		// remove from old files
+		}
+        if _, ok := cr.newFiles[v.newPath]; ok {         // remove from new files
+            delete(cr.newFiles, v.newPath)
+		}
+	}
+
+
+
 	compareReportName := "compare__" + oldReportName + "__" + newReportName
-	saveCompare(compareReportName, oh, nh, compareReport)
+	saveCompare(compareReportName, oh, nh, cr)
 	fmt.Printf("\n[Completed]\n\n")
 	
 

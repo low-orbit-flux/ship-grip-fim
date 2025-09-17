@@ -186,7 +186,7 @@ func compareReportsDataFile(oldReportName string, newReportName string, oldRepor
 
 
 
-func saveCompareFile(reportName string, oldHeader reportHeader, newHeader reportHeader, compareReport map[string]string){
+func saveCompareFile(reportName string, oldHeader reportHeader, newHeader reportHeader, cr compareReport){
 	_, e1 := os.Stat(reportDir)
     if os.IsNotExist(e1) {
     	err := os.Mkdir(reportDir, 0755)
@@ -216,9 +216,34 @@ func saveCompareFile(reportName string, oldHeader reportHeader, newHeader report
 		panic(err)
 	}
 	defer f2.Close()
-	for k, v := range compareReport {
-		if _, err = f2.WriteString(v + "," + k + "\n"); err != nil {
+
+
+
+    for k, v := range cr.newFiles {
+        fmt.Println("NEW - " + k + " - " + v)
+        if _, err = f2.WriteString("NEW - " + k + " - " + v + "\n"); err != nil {panic(err)}
+    }
+    for k, v := range cr.missingFiles {
+        fmt.Println("MISSING - " + k + " - " + v)
+        if _, err = f2.WriteString("MISSING - " + k + " - " + v + "\n"); err != nil {
 			panic(err)
 		}
-	}
+    }
+    for _, v := range cr.changedFiles {
+        fmt.Println("CHANGED - " + v.path + " - " + v.oldHash + " ==> " + v.newHash )
+        if _, err = f2.WriteString("CHANGED - " + v.path + " - " + v.oldHash + " ==> " + v.newHash + "\n"); err != nil {
+			panic(err)
+		}
+    }
+    for _, v := range cr.movedFiles {
+        fmt.Println("MOVED - " + v.oldPath + " ==> " + v.newPath + " - " + v.hash )
+        if _, err = f2.WriteString("MOVED - " + v.oldPath + " ==> " + v.newPath + " - " + v.hash + "\n"); err != nil {
+			panic(err)
+		}
+    }
+
+
+
+
+
 }
