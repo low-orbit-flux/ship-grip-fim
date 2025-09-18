@@ -85,7 +85,7 @@ func main() {
   	path := "/storage1"
     paraCount := 8
 	removeBasePath := false
-
+    configFile := "integrity.conf"
 
     // named params, "----" is default and won't override config file 
 	reportDir_ptr := flag.String("reportDir", "----", "report dir")
@@ -95,6 +95,7 @@ func main() {
     path_ptr := flag.String("path", "----", "path")
     paraCount_ptr := flag.String("paraCount", "----", "parallel instances ( CPU cores to use )")   
 	removeBasePath_ptr := flag.String("removeBasePath", "----", "remove base path")  
+	configFile_ptr := flag.String("configFile", "----", "config file path")  
 
 
     flag.Usage = usage
@@ -116,14 +117,11 @@ func main() {
 			} else { usage() }
 	}
 
-
-
-
-//     - check if config file path was overridden
-
+	// only this one gets assigned/derefferenced here ( before reading config file )
+	if *configFile_ptr != "----" { configFile = *configFile_ptr }
 
     // Read settings from config file, these may be overridden by any commandline args
- 	configData, err := ioutil.ReadFile("integrity.conf")
+ 	configData, err := ioutil.ReadFile(configFile)
     if err != nil {
         fmt.Println( "ERROR - can't read config file, using defaults")
     }
@@ -155,10 +153,6 @@ func main() {
 	if *path_ptr != "----"       { path       = *path_ptr }
 	if *paraCount_ptr != "----"  { paraCount, _ = strconv.Atoi(*paraCount_ptr) }
     if *removeBasePath_ptr != "----" { removeBasePath, _ = strconv.ParseBool(*removeBasePath_ptr) }
-fmt.Println("debug")
-fmt.Println(reportDir)
-fmt.Println(reportDir_ptr)
-
 
     switch action {
 		case "scan":
