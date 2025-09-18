@@ -3,7 +3,6 @@ Integrity
 
 	- ignore list ( ex. exclude .DS_Store )
 	- specify config file as CLI arg
-	- override config file options
 
 
     Service ( agent )

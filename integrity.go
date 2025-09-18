@@ -86,7 +86,14 @@ func main() {
     paraCount := 8
 	removeBasePath := false
 
-    
+
+    // named params, "----" is default and won't override config file 
+	reportDir_ptr := flag.String("reportDir", "----", "report dir")
+    dataSource_ptr := flag.String("dataSource", "----", "data source type")
+    reportName_ptr := flag.String("reportName", "----", "report name")
+    host_ptr := flag.String("host", "----", "host")
+    path_ptr := flag.String("path", "----", "path")
+    paraCount_ptr := flag.String("paraCount", "----", "parallel instances ( CPU cores to use )")   
 	removeBasePath_ptr := flag.String("removeBasePath", "----", "remove base path")  
 
 
@@ -141,12 +148,17 @@ func main() {
 		- only if they don't have the default value ("----"), meaning they were actually set
 		- also need to be de-referenced and converted
     */
+	if *reportDir_ptr != "----"  { reportDir  = *reportDir_ptr }
+	if *dataSource_ptr != "----" { dataSource = *dataSource_ptr }
+	if *reportName_ptr != "----" { reportName = *reportName_ptr }
+	if *host_ptr != "----"       { host       = *host_ptr }
+	if *path_ptr != "----"       { path       = *path_ptr }
+	if *paraCount_ptr != "----"  { paraCount, _ = strconv.Atoi(*paraCount_ptr) }
     if *removeBasePath_ptr != "----" { removeBasePath, _ = strconv.ParseBool(*removeBasePath_ptr) }
+fmt.Println("debug")
+fmt.Println(reportDir)
+fmt.Println(reportDir_ptr)
 
-    fmt.Println("debug")
-	    fmt.Println(*removeBasePath_ptr)
-
-    fmt.Println(removeBasePath)
 
     switch action {
 		case "scan":
