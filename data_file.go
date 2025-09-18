@@ -107,7 +107,7 @@ func reportStatFile(reportName string)(reportHeader){
     return rh
 }
 
-func compareReportsDataFile(oldReportName string, newReportName string, oldReport map[string]string, newReport map[string]string, oldHeader reportHeader, newHeader reportHeader, removeBasePath string){
+func compareReportsDataFile(oldReportName string, newReportName string, oldReport map[string]string, newReport map[string]string, oldHeader reportHeader, newHeader reportHeader, removeBasePath bool){
   
 
 	fmt.Printf("\nLoading first cache...\n\n")
@@ -157,7 +157,7 @@ func compareReportsDataFile(oldReportName string, newReportName string, oldRepor
         panic(err)
     }
 
-    if removeBasePath == "yes" {
+    if removeBasePath {
         keys1 := make([]string, 0, len(oldReport))
         for k := range oldReport {
             keys1 = append(keys1, k)

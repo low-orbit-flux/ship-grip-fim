@@ -69,7 +69,7 @@ func reportStat(reportName string)(reportHeader){
 }
 
 
-func compareReportsData(oldReportName string, newReportName string, oldReport map[string]string, newReport map[string]string, oldHeader reportHeader, newHeader reportHeader, removeBasePath string){
+func compareReportsData(oldReportName string, newReportName string, oldReport map[string]string, newReport map[string]string, oldHeader reportHeader, newHeader reportHeader, removeBasePath bool){
 	if( dataSource == "file" ) {
 		compareReportsDataFile(oldReportName, newReportName, oldReport, newReport, oldHeader, newHeader, removeBasePath)
 	} else {

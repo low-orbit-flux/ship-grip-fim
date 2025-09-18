@@ -145,7 +145,7 @@ type compareReport struct {
 	movedFiles []move
 }
 
-func compareReports(oldReportName string, newReportName string, removeBasePath string, ){ 
+func compareReports(oldReportName string, newReportName string, removeBasePath bool ){ 
 	oldReport := make(map[string]string)
 	newReport := make(map[string]string)  
 

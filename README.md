@@ -2,9 +2,9 @@ Integrity
 
 
 	- ignore list ( ex. exclude .DS_Store )
-    - specify multiple paths to check for report
-	- commenting things out in the config file doesn't always work
 	- specify config file as CLI arg
+	- override config file options
+
 
     Service ( agent )
 	    - CLI can connect to service ( all normal functionality )
@@ -35,10 +35,15 @@ Integrity
 
     - One report / table combining multiple reports from differenet hosts ( newest from each )
 
+
+   Future features:
+   
+   	- propper logging
     - compare should also be parallel
 	- search single file accross reports
-	- ctime, atime etc
-	 
+	- monitor permissions / owner ( Linux, Windows, etc. )
+	- security queries for permissions ( search for writable and SUID, etc )
+	- specify multiple paths to check for report ( this will make base path var messy, just run separate instances for now )
 
 Build and Run:
 
