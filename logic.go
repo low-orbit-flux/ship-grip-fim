@@ -64,38 +64,30 @@ func sumFile(file string) string {
   
 	  defer wg.Done()
 	  for _, file := range *allFilesList {
-		//fmt.Printf("%v\n", file)
-		  r := sumFile(file)
-		  //fmt.Printf("\n%v", r)
-  
-	  fileMap.mux.Lock()
-		fileMap.v[file] = r
-		fileMap.mux.Unlock()
-	  }
-  
-  
+		  r := sumFile(file)  
+	      fileMap.mux.Lock()
+		  fileMap.v[file] = r
+		  fileMap.mux.Unlock()
+	  }  
   }
 
   
-func parallelFileCheck(config configInfo, fileMap *SafeFileMap, paraCount int, path string) {
+func parallelFileCheck(config configInfo, fileMap *SafeFileMap) {
 
 	var wg sync.WaitGroup
   
 	allFilesList := make([]string, 0, 10)
   
-	walkFiles(config, path, &allFilesList)
+	walkFiles(config, config.path, &allFilesList)
   
-	splitIncrement := len(allFilesList) / paraCount
+	splitIncrement := len(allFilesList) / config.paraCount
 	splitS := 0
 	splitE := splitIncrement
-	wg.Add(paraCount)
-	//fmt.Printf("\narray len: %v\n",len(allFilesList))
-	//fmt.Printf("\nsplit increment: %v\n",splitIncrement)
-	//fmt.Printf("%v\n",len(allFilesList))
-	for i := 0; i < paraCount; i++ {
+	wg.Add(config.paraCount)
+
+	for i := 0; i < config.paraCount; i++ {
 	    aPart := allFilesList[splitS:splitE]
 	    go checkFiles(&aPart, fileMap, &wg)   // process a slice
-	    //fmt.Printf("%v %v\n", splitS, splitE)
 	    splitS = splitE
 	    splitE += splitIncrement
 	    // avoid off by one at the end of the array
@@ -111,7 +103,7 @@ func parallelFileCheck(config configInfo, fileMap *SafeFileMap, paraCount int, p
 	    //	 check above this but we're keeping it anyway in case we get rid of this
 	    //	 part.
 	  
-	    if i == paraCount-2 {
+	    if i == config.paraCount-2 {
 	    	splitE = len(allFilesList)
 	    }
 	}
@@ -145,7 +137,7 @@ type compareReport struct {
 	movedFiles []move
 }
 
-func compareReports(config configInfo, oldReportName string, newReportName string, removeBasePath bool ){ 
+func compareReports(config configInfo, oldReportName string, newReportName string ){ 
 	oldReport := make(map[string]string)
 	newReport := make(map[string]string)  
 
@@ -156,10 +148,10 @@ func compareReports(config configInfo, oldReportName string, newReportName strin
         movedFiles:   []move{},
     }
 
-	oh := reportStatFile(oldReportName) // old header
-	nh := reportStatFile(newReportName) // new header
+	oh := reportStatFile(config, oldReportName) // old header
+	nh := reportStatFile(config, newReportName) // new header
 
-	compareReportsData(oldReportName, newReportName, oldReport, newReport, oh, nh, removeBasePath)
+	compareReportsData(config, oldReportName, newReportName, oldReport, newReport, oh, nh)
 
 	fmt.Printf("\nBoth caches loaded...\n\n")
 
@@ -216,7 +208,7 @@ func compareReports(config configInfo, oldReportName string, newReportName strin
 
 
 	compareReportName := "compare__" + oldReportName + "__" + newReportName
-	saveCompare(compareReportName, oh, nh, cr)
+	saveCompare(config, compareReportName, oh, nh, cr)
 	fmt.Printf("\n[Completed]\n\n")
 	
 

@@ -9,12 +9,12 @@ import (
 	"strings"
 )
 
-func saveToDBFile(config configInfo, reportName string, host string, path string, fileMap *SafeFileMap){
+func saveToDBFile(config configInfo, fileMap *SafeFileMap){
 	fileMap.mux.Lock()
 
-	_, e1 := os.Stat(reportDir)
+	_, e1 := os.Stat(config.reportDir)
     if os.IsNotExist(e1) {
-    	err := os.Mkdir(reportDir, 0755)
+    	err := os.Mkdir(config.reportDir, 0755)
         if err != nil {
             fmt.Print("\n\n\n\nERROR - Can't create report dir.\n\n\n\n")
             panic(err)
@@ -25,15 +25,15 @@ func saveToDBFile(config configInfo, reportName string, host string, path string
     timeString := t.Format("2006-01-02_15:04:05") // just format, not hardcoded
 	fmt.Print(timeString)
     
-	f, err := os.OpenFile(reportDir + "/" + reportName + "_" + timeString, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0600)
+	f, err := os.OpenFile(config.reportDir + "/" + config.reportName + "_" + timeString, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0600)
 	if err != nil {
 		panic(err)
 	}
 	defer f.Close()
-	if _, err = f.WriteString(reportName + "," + timeString + "," + host + "," + path + "\n"); err != nil {
+	if _, err = f.WriteString(config.reportName + "," + timeString + "," + config.host + "," + config.path + "\n"); err != nil {
 		panic(err)
 	}
-	f2, err := os.OpenFile(reportDir + "/" + reportName + "_" + timeString, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
+	f2, err := os.OpenFile(config.reportDir + "/" + config.reportName + "_" + timeString, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
 	if err != nil {
 		panic(err)
 	}
@@ -48,9 +48,9 @@ func saveToDBFile(config configInfo, reportName string, host string, path string
 }
 
 
-func listReportsFile()(string){
+func listReportsFile(config configInfo)(string){
 	output := ""
-    f, err := ioutil.ReadDir(reportDir)
+    f, err := ioutil.ReadDir(config.reportDir)
     if err != nil {
         fmt.Println("\n\n\n============================================\n")
         fmt.Println("Empty, no reports or other error, see below.\n")
@@ -67,9 +67,9 @@ func listReportsFile()(string){
 
 
 
-func listReportDataFile(reportName string){
+func listReportDataFile(config configInfo, id1 string){
 
-    f, err := os.Open(reportDir + "/" + reportName)
+    f, err := os.Open(config.reportDir + "/" + id1)
     if err != nil {
         panic(err)
     }
@@ -83,11 +83,11 @@ func listReportDataFile(reportName string){
     }
 }
 
-func reportStatFile(reportName string)(reportHeader){
+func reportStatFile(config configInfo, reportNamePath string)(reportHeader){
     // could have just returned this info from compareReportsDataFile() but 
     // nice to have a dedicated function for other purposes
 
-    f, err := os.Open(reportDir + "/" + reportName)
+    f, err := os.Open(config.reportDir + "/" + reportNamePath)
     if err != nil {
         panic(err)
     }
@@ -107,12 +107,12 @@ func reportStatFile(reportName string)(reportHeader){
     return rh
 }
 
-func compareReportsDataFile(oldReportName string, newReportName string, oldReport map[string]string, newReport map[string]string, oldHeader reportHeader, newHeader reportHeader, removeBasePath bool){
+func compareReportsDataFile(config configInfo, oldReportName string, newReportName string, oldReport map[string]string, newReport map[string]string, oldHeader reportHeader, newHeader reportHeader){
   
 
 	fmt.Printf("\nLoading first cache...\n\n")
 
-    f, err := os.Open(reportDir + "/" + oldReportName)
+    f, err := os.Open(config.reportDir + "/" + oldReportName)
     if err != nil {
         panic(err)
     }
@@ -137,7 +137,7 @@ func compareReportsDataFile(oldReportName string, newReportName string, oldRepor
 	fmt.Printf("\nLoading second cache...\n\n")
 
 
-    f2, err := os.Open(reportDir + "/" + newReportName)
+    f2, err := os.Open(config.reportDir + "/" + newReportName)
     if err != nil {
         panic(err)
     }
@@ -157,7 +157,7 @@ func compareReportsDataFile(oldReportName string, newReportName string, oldRepor
         panic(err)
     }
 
-    if removeBasePath {
+    if config.removeBasePath {
         keys1 := make([]string, 0, len(oldReport))
         for k := range oldReport {
             keys1 = append(keys1, k)
@@ -186,10 +186,10 @@ func compareReportsDataFile(oldReportName string, newReportName string, oldRepor
 
 
 
-func saveCompareFile(reportName string, oldHeader reportHeader, newHeader reportHeader, cr compareReport){
-	_, e1 := os.Stat(reportDir)
+func saveCompareFile(config configInfo, compareReportName string, oldHeader reportHeader, newHeader reportHeader, cr compareReport){
+	_, e1 := os.Stat(config.reportDir)
     if os.IsNotExist(e1) {
-    	err := os.Mkdir(reportDir, 0755)
+    	err := os.Mkdir(config.reportDir, 0755)
         if err != nil {
             fmt.Print("\n\n\n\nERROR - Can't create report dir.\n\n\n\n")
             panic(err)
@@ -199,7 +199,7 @@ func saveCompareFile(reportName string, oldHeader reportHeader, newHeader report
     t := time.Now()
     timeString := t.Format("2006-01-02_15:04:05") // just format, not hardcoded
 
-	f, err := os.OpenFile(reportDir + "/" + reportName + "__" + timeString, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0600)
+	f, err := os.OpenFile(config.reportDir + "/" + compareReportName + "__" + timeString, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0600)
 	if err != nil {
 		panic(err)
 	}
@@ -211,7 +211,7 @@ func saveCompareFile(reportName string, oldHeader reportHeader, newHeader report
 		panic(err)
 	}
     
-	f2, err := os.OpenFile(reportDir + "/" + reportName + "__" + timeString, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
+	f2, err := os.OpenFile(config.reportDir + "/" + compareReportName + "__" + timeString, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
 	if err != nil {
 		panic(err)
 	}
@@ -241,9 +241,5 @@ func saveCompareFile(reportName string, oldHeader reportHeader, newHeader report
 			panic(err)
 		}
     }
-
-
-
-
 
 }

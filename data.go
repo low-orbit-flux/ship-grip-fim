@@ -5,19 +5,6 @@ import (
 	"fmt"
 )
 
-/*
-
-
-type DBConnect struct {
-	databaseHost string
-	database string
-	reportCollection string
-	fileHashCollection string
-}
-
-
-*/
-
 type reportHeader struct {
 	name string 
 	time string
@@ -26,9 +13,9 @@ type reportHeader struct {
 }
 
 
-func saveToDB(config configInfo, reportName string, host string, path string, fileMap *SafeFileMap){
-	if dataSource == "file" {	
-		saveToDBFile(config, reportName, host, path, fileMap)
+func saveToDB(config configInfo, fileMap *SafeFileMap){
+	if config.dataSource == "file" {	
+		saveToDBFile(config, fileMap)
 	}else {
 		fmt.Printf("ERROR - no valid data source specified")
 	}
@@ -36,10 +23,10 @@ func saveToDB(config configInfo, reportName string, host string, path string, fi
 }
 
 
-func listReports()(string){
+func listReports(config configInfo)(string){
 	output := ""
-	if dataSource == "file" {	
-		output += listReportsFile()
+	if config.dataSource == "file" {	
+		output += listReportsFile(config)
 	}else {
 		fmt.Printf("ERROR - no valid data source specified")
 		output += "ERROR - no valid data source specified"
@@ -49,9 +36,9 @@ func listReports()(string){
 
 
 
-func listReportData(reportName string){
-	if dataSource == "file" {	
-		listReportDataFile(reportName)
+func listReportData(config configInfo, id1 string){
+	if config.dataSource == "file" {	
+		listReportDataFile(config, id1)
 	}else {
 		fmt.Printf("ERROR - no valid data source specified")
 	}
@@ -59,9 +46,9 @@ func listReportData(reportName string){
 }
 
 
-func reportStat(reportName string)(reportHeader){
-	if dataSource == "file" {	
-		return reportStatFile(reportName)
+func reportStat(config configInfo, reportNamePath string)(reportHeader){
+	if config.dataSource == "file" {	
+		return reportStatFile(config, reportNamePath)
 	}else {
 		fmt.Printf("ERROR - no valid data source specified")
 		return reportHeader{}  // return empty
@@ -69,18 +56,18 @@ func reportStat(reportName string)(reportHeader){
 }
 
 
-func compareReportsData(oldReportName string, newReportName string, oldReport map[string]string, newReport map[string]string, oldHeader reportHeader, newHeader reportHeader, removeBasePath bool){
-	if( dataSource == "file" ) {
-		compareReportsDataFile(oldReportName, newReportName, oldReport, newReport, oldHeader, newHeader, removeBasePath)
+func compareReportsData(config configInfo, oldReportName string, newReportName string, oldReport map[string]string, newReport map[string]string, oldHeader reportHeader, newHeader reportHeader){
+	if( config.dataSource == "file" ) {
+		compareReportsDataFile(config, oldReportName, newReportName, oldReport, newReport, oldHeader, newHeader)
 	} else {
 		fmt.Printf("ERROR - no valid data source specified")
 	}
 }
 
 
-func saveCompare(reportName string, oldHeader reportHeader, newHeader reportHeader, cr compareReport){
-	if dataSource == "file" {	
-		saveCompareFile(reportName, oldHeader, newHeader, cr)
+func saveCompare(config configInfo, compareReportName string, oldHeader reportHeader, newHeader reportHeader, cr compareReport){
+	if config.dataSource == "file" {	
+		saveCompareFile(config, compareReportName, oldHeader, newHeader, cr)
 	}else {
 		fmt.Printf("ERROR - no valid data source specified")
 	}

@@ -1,12 +1,6 @@
-Integrity
-
-
-	- ignore list ( ex. exclude .DS_Store )
-	- all configs in a structure
-	- pass config to everything
-
 
     Service ( agent )
+	    - remote command
 	    - CLI can connect to service ( all normal functionality )
 		- option to save reports locally ( sync reports )
 		- CLI can have a server list
@@ -38,7 +32,8 @@ Integrity
 
    Future features:
    
-    - test on Windows
+    - encrypted connection
+	- test on Windows
    	- propper logging
     - compare should also be parallel
 	- search single file accross reports

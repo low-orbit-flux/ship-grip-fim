@@ -28,6 +28,14 @@ import (
 )
 
 type configInfo struct {
+	reportDir string
+    dataSource string
+    reportName string
+    host string
+    path string
+    paraCount int
+    removeBasePath bool
+    configFile string
 	ignorePathConfig string
 	ignorePathNoWalkConfig string
 	ignorePath []*regexp.Regexp
@@ -74,38 +82,30 @@ Usage:
 	log.Fatal("\n\nExiting ...")
 }
 
-/*
-    Global hardcoded settings, these will be used if there are no args and nothing
-		is found in the config file.
-*/
-var reportDir = "~/integirty_reports"
-var dataSource = "file"  
-
 func main() {
-
-    config := configInfo{
-
-		ignorePathConfig: "",
-		ignorePathNoWalkConfig: "",
-	    ignorePath:        []*regexp.Regexp{},
-	    ignorePathNoWalk:  []*regexp.Regexp{},
-	    test:              "",
-    }
-
 
 
     /*
         Hardcoded settings, these will be used if there are no args and nothing
 	    	is found in the config file.
+		Decided NOT to make these GLOBAL so that in the future it will be easier
+		to have separate running jobs that use different structures in parallel.
     */
-    reportName := "default_adhoc_report"
-    host := "duck-puppy"
-  	path := "/storage1"
-    paraCount := 8
-	removeBasePath := false
-    configFile := "integrity.conf"
-	config.ignorePathConfig="integrity_ignore.cfg"
-	config.ignorePathNoWalkConfig="integrity_ignore_no_walk.cfg"
+    config := configInfo{
+		reportDir:  "~/integirty_reports",    // was originally global
+    	dataSource: "file",                   // was originally global
+    	reportName:  "default_adhoc_report",
+    	host:  "duck-puppy",
+  		path:  "/storage1",
+    	paraCount:  8,
+		removeBasePath:  false,
+    	configFile:  "integrity.conf",
+		ignorePathConfig: "integrity_ignore.cfg",
+		ignorePathNoWalkConfig: "integrity_ignore_no_walk.cfg",
+	    ignorePath:        []*regexp.Regexp{},
+	    ignorePathNoWalk:  []*regexp.Regexp{},
+    }
+
 
     // named params, "----" is default and won't override config file 
 	reportDir_ptr := flag.String("reportDir", "----", "report dir")
@@ -139,28 +139,28 @@ func main() {
 	}
 
 	// only this one gets assigned/derefferenced here ( before reading config file )
-	if *configFile_ptr != "----" { configFile = *configFile_ptr }
+	if *configFile_ptr != "----" { config.configFile = *configFile_ptr }
 
     // Read settings from config file, these may be overridden by any commandline args
- 	configData, err := ioutil.ReadFile(configFile)
+ 	configData, err := ioutil.ReadFile(config.configFile)
     if err != nil {
         fmt.Println( "ERROR - can't read config file, using defaults")
     }
     cf := string(configData)
     re1, err := regexp.Compile(`(?m)^(reportName)="(.*)"`)
-    if r := re1.FindAllStringSubmatch(cf, -1); r != nil { reportName = r[0][2] }
+    if r := re1.FindAllStringSubmatch(cf, -1); r != nil { config.reportName = r[0][2] }
 	re1, err = regexp.Compile(`(?m)^(host)="(.*)"`)
-    if r := re1.FindAllStringSubmatch(cf, -1); r != nil { host = r[0][2] }
+    if r := re1.FindAllStringSubmatch(cf, -1); r != nil { config.host = r[0][2] }
 	re1, err = regexp.Compile(`(?m)^(path)="(.*)"`)
-    if r := re1.FindAllStringSubmatch(cf, -1); r != nil { path = r[0][2]	}
+    if r := re1.FindAllStringSubmatch(cf, -1); r != nil { config.path = r[0][2]	}
 	re1, err = regexp.Compile(`(?m)^(reportDir)="(.*)"`)
-    if r := re1.FindAllStringSubmatch(cf, -1); r != nil { reportDir = r[0][2] }
+    if r := re1.FindAllStringSubmatch(cf, -1); r != nil { config.reportDir = r[0][2] }
 	re1, err = regexp.Compile(`(?m)^(dataSource)="(.*)"`)
-	if r := re1.FindAllStringSubmatch(cf, -1); r != nil { dataSource = r[0][2] }
+	if r := re1.FindAllStringSubmatch(cf, -1); r != nil { config.dataSource = r[0][2] }
 	re1, err = regexp.Compile(`(?m)^(paraCount)="(.*)"`)
-	if r := re1.FindAllStringSubmatch(cf, -1); r != nil { paraCount, err = strconv.Atoi(r[0][2]) }
+	if r := re1.FindAllStringSubmatch(cf, -1); r != nil { config.paraCount, err = strconv.Atoi(r[0][2]) }
 	re1, err = regexp.Compile(`(?m)^(removeBasePath)="(.*)"`)
-	if r := re1.FindAllStringSubmatch(cf, -1); r != nil { removeBasePath, _ = strconv.ParseBool(r[0][2]) }
+	if r := re1.FindAllStringSubmatch(cf, -1); r != nil { config.removeBasePath, _ = strconv.ParseBool(r[0][2]) }
 	re1, err = regexp.Compile(`(?m)^(ignorePathConfig)="(.*)"`)
 	if r := re1.FindAllStringSubmatch(cf, -1); r != nil { config.ignorePathConfig = r[0][2] }
 	re1, err = regexp.Compile(`(?m)^(ignorePathNoWalkConfig)="(.*)"`)
@@ -172,13 +172,13 @@ func main() {
 		- only if they don't have the default value ("----"), meaning they were actually set
 		- also need to be de-referenced and converted
     */
-	if *reportDir_ptr != "----"  { reportDir  = *reportDir_ptr }
-	if *dataSource_ptr != "----" { dataSource = *dataSource_ptr }
-	if *reportName_ptr != "----" { reportName = *reportName_ptr }
-	if *host_ptr != "----"       { host       = *host_ptr }
-	if *path_ptr != "----"       { path       = *path_ptr }
-	if *paraCount_ptr != "----"  { paraCount, _ = strconv.Atoi(*paraCount_ptr) }
-    if *removeBasePath_ptr != "----"         { removeBasePath, _ = strconv.ParseBool(*removeBasePath_ptr) }
+	if *reportDir_ptr != "----"  { config.reportDir  = *reportDir_ptr }
+	if *dataSource_ptr != "----" { config.dataSource = *dataSource_ptr }
+	if *reportName_ptr != "----" { config.reportName = *reportName_ptr }
+	if *host_ptr != "----"       { config.host       = *host_ptr }
+	if *path_ptr != "----"       { config.path       = *path_ptr }
+	if *paraCount_ptr != "----"  { config.paraCount, _ = strconv.Atoi(*paraCount_ptr) }
+    if *removeBasePath_ptr != "----"         { config.removeBasePath, _ = strconv.ParseBool(*removeBasePath_ptr) }
 	if *ignorePathConfig_ptr != "----"       { config.ignorePathConfig       = *ignorePathConfig_ptr }
 	if *ignorePathNoWalkConfig_ptr != "----" { config.ignorePathNoWalkConfig       = *ignorePathNoWalkConfig_ptr }
 
@@ -191,24 +191,24 @@ func main() {
 
     switch action {
 		case "scan":
-			if _, err := os.Stat(path); err != nil {
+			if _, err := os.Stat(config.path); err != nil {
 				if os.IsNotExist(err) { fmt.Println("ERROR - Directory does not exist")
 				} else { fmt.Println("ERROR - ", err) }
 			} else {
                 fileMap := SafeFileMap{v: make(map[string]string)}
-		    	fmt.Printf("ParaCount: %v\n\n",paraCount)
-                parallelFileCheck(config, &fileMap, paraCount, path)
-		    	fmt.Printf("test %s, %s, %s, %s",reportName, host, path, reportDir)
-		        saveToDB(config, reportName, host, path, &fileMap)
+		    	fmt.Printf("ParaCount: %v\n\n",config.paraCount)
+                parallelFileCheck(config, &fileMap )
+		    	fmt.Printf("test %s, %s, %s, %s", config.reportName, config.host, config.path, config.reportDir)
+		        saveToDB(config, &fileMap)
 			}
 		case "list":	
-			listReports()
+			listReports(config)
 			
 		case "data":
-			listReportData(id1)
+			listReportData(config, id1)
 			
 		case "compare":
-    	    compareReports(config, id1, id2, removeBasePath)  
+    	    compareReports(config, id1, id2)  
 	/*
 		case "server":
 		    startServer()

@@ -45,8 +45,9 @@ func handleConnection(connection1 net.Conn) {
 		    case "scan":
                 connection1.Write([]byte("scan"))
 			case "list":
-				output := listReports()
-			    connection1.Write([]byte(output))
+				//output := listReports()
+			    //connection1.Write([]byte(output))
+                connection1.Write([]byte("test"))
 			default:
 				connection1.Write([]byte("unknown command"))
 		}
