@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-func startServer() {
+func startAgentServer(config configInfo) {
 	host := "localhost"
     port := "8080"
     protocol := "tcp"
@@ -28,11 +28,11 @@ func startServer() {
         }
         fmt.Println("Client connected: " + c.RemoteAddr().String())
 
-        go handleConnection(c)
+        go handleConnection(config, c)
     }
 }
 
-func handleConnection(connection1 net.Conn) {
+func handleConnection(config configInfo, connection1 net.Conn) {
     for {
         buffer, err := bufio.NewReader(connection1).ReadBytes('\n')
         if err != nil {
@@ -43,11 +43,25 @@ func handleConnection(connection1 net.Conn) {
 		log.Println("Client message:", string(buffer[:len(buffer)-1]))
 		switch strings.TrimSpace(string(buffer)) {
 		    case "scan":
-                connection1.Write([]byte("scan"))
+                connection1.Write([]byte("\nscanning...\n"))
+                callScan(config)
+                connection1.Write([]byte("\nScan Complete\n"))
 			case "list":
 				//output := listReports()
 			    //connection1.Write([]byte(output))
-                connection1.Write([]byte("test"))
+                connection1.Write([]byte("\nlisting reports ....\n"))
+	
+    			output := listReports(config)
+                connection1.Write([]byte(output))
+                connection1.Write([]byte("\nList Complete\n"))
+			
+	    	//case "data":
+			//    listReportData(config, id1)
+			
+		    //case "compare":
+    	    //    compareReports(config, id1, id2)  
+
+                
 			default:
 				connection1.Write([]byte("unknown command"))
 		}

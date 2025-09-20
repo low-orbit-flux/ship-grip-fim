@@ -1,12 +1,23 @@
 
     Service ( agent )
-	    - remote command
+	    - need port and IP (interface ) set from config params
+	    - CLI:   "ship-grip-fim remote host port command"
+
+		- list reports returns imediately
+		- scan runs in BG ( need to break this off )
+        - show scan is currently running  ( scan status command )
+		- don't run when a scan or compare is already running
+		
+
 	    - CLI can connect to service ( all normal functionality )
 		- option to save reports locally ( sync reports )
 		- CLI can have a server list
 		- CLI can start service on host
 		- Check status/connectivity of all services
 		- bulk request
+
+
+	- change logo
 
 	
 	GUI
@@ -33,6 +44,7 @@
    Future features:
    
     - encrypted connection
+	- pass configuration to agents remotely
 	- test on Windows
    	- propper logging
     - compare should also be parallel

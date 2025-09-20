@@ -188,19 +188,9 @@ func main() {
 	loadConfigsOther(config.ignorePathNoWalkConfig, &config.ignorePathNoWalk)// load other configs ( exclude files)
 
 
-
     switch action {
 		case "scan":
-			if _, err := os.Stat(config.path); err != nil {
-				if os.IsNotExist(err) { fmt.Println("ERROR - Directory does not exist")
-				} else { fmt.Println("ERROR - ", err) }
-			} else {
-                fileMap := SafeFileMap{v: make(map[string]string)}
-		    	fmt.Printf("ParaCount: %v\n\n",config.paraCount)
-                parallelFileCheck(config, &fileMap )
-		    	fmt.Printf("test %s, %s, %s, %s", config.reportName, config.host, config.path, config.reportDir)
-		        saveToDB(config, &fileMap)
-			}
+            callScan(config)
 		case "list":	
 			listReports(config)
 			
@@ -209,16 +199,28 @@ func main() {
 			
 		case "compare":
     	    compareReports(config, id1, id2)  
-	/*
-		case "server":
-		    startServer()
+
+		case "agent":
+		    startAgentServer(config)
 		default:
 			usage()
-    */
+
     }
 }
 
-
+// this needs to be a function called by other 
+func callScan(config configInfo){
+	if _, err := os.Stat(config.path); err != nil {
+		if os.IsNotExist(err) { fmt.Println("ERROR - Directory does not exist")
+		} else { fmt.Println("ERROR - ", err) }
+	} else {
+        fileMap := SafeFileMap{v: make(map[string]string)}
+	   	fmt.Printf("ParaCount: %v\n\n",config.paraCount)
+        parallelFileCheck(config, &fileMap )
+	 	fmt.Printf("test %s, %s, %s, %s", config.reportName, config.host, config.path, config.reportDir)
+	    saveToDB(config, &fileMap)
+	}
+}
 
 
 func loadConfigsOther(cPath string, cList *[]*regexp.Regexp) {
