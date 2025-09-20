@@ -26,9 +26,9 @@ type reportHeader struct {
 }
 
 
-func saveToDB(reportName string, host string, path string, fileMap *SafeFileMap){
+func saveToDB(config configInfo, reportName string, host string, path string, fileMap *SafeFileMap){
 	if dataSource == "file" {	
-		saveToDBFile(reportName, host, path, fileMap)
+		saveToDBFile(config, reportName, host, path, fileMap)
 	}else {
 		fmt.Printf("ERROR - no valid data source specified")
 	}

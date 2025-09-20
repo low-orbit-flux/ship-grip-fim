@@ -8,11 +8,6 @@ import (
 	"log"
 	"os"
 	"sync"
-	//"regexp"
-	//"strconv"
-	//"strings"
-  //"goji.io"
-//"goji.io/pat"
 )
 
 
@@ -39,7 +34,12 @@ func sumFile(file string) string {
 	  return fmt.Sprintf("%x", h.Sum(nil))
   }
   
-  func walkFiles(dir string, allFilesList *[]string) {
+  func walkFiles(config configInfo, dir string, allFilesList *[]string) {
+
+      for _, p := range config.ignorePathNoWalk {             // don't walk if on the exclude list
+            if p.MatchString(dir) {fmt.Println("DEBUG: excluding " + dir); return }
+	  }
+
 	  files, err := ioutil.ReadDir(dir)
 	  if err != nil {
 		  log.Print(err)
@@ -50,7 +50,7 @@ func sumFile(file string) string {
 		  case file.IsDir():
 			  name := file.Name()
 			  //fmt.Printf("dir %s\n", name)
-			  walkFiles(dir+"/"+name, allFilesList) // dir - recursive call
+			  walkFiles(config, dir+"/"+name, allFilesList) // dir - recursive call
 		  case file.Mode().IsRegular():
 			  name := file.Name()
 			  //sumFile(dir + "/" + name)
@@ -77,13 +77,13 @@ func sumFile(file string) string {
   }
 
   
-func parallelFileCheck( fileMap *SafeFileMap, paraCount int, path string) {
+func parallelFileCheck(config configInfo, fileMap *SafeFileMap, paraCount int, path string) {
 
 	var wg sync.WaitGroup
   
 	allFilesList := make([]string, 0, 10)
   
-	walkFiles(path, &allFilesList)
+	walkFiles(config, path, &allFilesList)
   
 	splitIncrement := len(allFilesList) / paraCount
 	splitS := 0
@@ -145,7 +145,7 @@ type compareReport struct {
 	movedFiles []move
 }
 
-func compareReports(oldReportName string, newReportName string, removeBasePath bool ){ 
+func compareReports(config configInfo, oldReportName string, newReportName string, removeBasePath bool ){ 
 	oldReport := make(map[string]string)
 	newReport := make(map[string]string)  
 
@@ -167,22 +167,32 @@ func compareReports(oldReportName string, newReportName string, removeBasePath b
 		if v2, ok := newReport[k]; ok {
 			if v2 != v {
 				//fmt.Printf("ERROR - hashes don't match: %v  %v  %v\n", k, v, v2)
-				cr.changedFiles = append(cr.changedFiles, change{ path: k, oldHash: v, newHash: v2 })
+			    for _, p := range config.ignorePath {             // don't keep if on the exclude list  ( check here so we don't have to loop the entire report )
+                    if !p.MatchString(k) {
+						cr.changedFiles = append(cr.changedFiles, change{ path: k, oldHash: v, newHash: v2 })
+		            } 
+		        }
+				
 			}
 			delete(newReport, k)           // delete, anything left is a newly found file
 		} else {
 			//fmt.Printf("ERROR - missing file: %v\n", k)
-			cr.missingFiles[k] = v
+			for _, p := range config.ignorePath {             // don't keep if on the exclude list  ( check here so we don't have to loop the entire report )
+                if !p.MatchString(k) {
+			        cr.missingFiles[k] = v			
+				} 
+	        }
+			
 		}
     }
 	for k, v := range newReport {                // anything left is new
 		//fmt.Printf("NEW FILE: %v - %v\n", k, v)
-		cr.newFiles[k] = v
+		for _, p := range config.ignorePath {             // don't keep if on the exclude list  ( check here so we don't have to loop the entire report )
+            if !p.MatchString(k) {
+		        cr.newFiles[k] = v	
+		    } 
+		}
 	}
-
-
-
-
 
 
 	for k, v := range cr.missingFiles {

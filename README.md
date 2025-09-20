@@ -2,7 +2,8 @@ Integrity
 
 
 	- ignore list ( ex. exclude .DS_Store )
-	- specify config file as CLI arg
+	- all configs in a structure
+	- pass config to everything
 
 
     Service ( agent )
@@ -37,6 +38,7 @@ Integrity
 
    Future features:
    
+    - test on Windows
    	- propper logging
     - compare should also be parallel
 	- search single file accross reports

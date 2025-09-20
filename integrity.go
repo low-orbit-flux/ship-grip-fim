@@ -16,7 +16,7 @@ package main
 
 import (
 	"fmt"
-	//"bufio"
+	"bufio"
 	//"io"
 	"io/ioutil"
 	"log"	
@@ -24,9 +24,16 @@ import (
 	"flag"
 	"regexp"
 	"strconv"
+	"strings"
 )
 
-
+type configInfo struct {
+	ignorePathConfig string
+	ignorePathNoWalkConfig string
+	ignorePath []*regexp.Regexp
+	ignorePathNoWalk []*regexp.Regexp
+	test string
+}
 
 func usage() {
 	usageString := `
@@ -76,6 +83,17 @@ var dataSource = "file"
 
 func main() {
 
+    config := configInfo{
+
+		ignorePathConfig: "",
+		ignorePathNoWalkConfig: "",
+	    ignorePath:        []*regexp.Regexp{},
+	    ignorePathNoWalk:  []*regexp.Regexp{},
+	    test:              "",
+    }
+
+
+
     /*
         Hardcoded settings, these will be used if there are no args and nothing
 	    	is found in the config file.
@@ -86,6 +104,8 @@ func main() {
     paraCount := 8
 	removeBasePath := false
     configFile := "integrity.conf"
+	config.ignorePathConfig="integrity_ignore.cfg"
+	config.ignorePathNoWalkConfig="integrity_ignore_no_walk.cfg"
 
     // named params, "----" is default and won't override config file 
 	reportDir_ptr := flag.String("reportDir", "----", "report dir")
@@ -96,7 +116,8 @@ func main() {
     paraCount_ptr := flag.String("paraCount", "----", "parallel instances ( CPU cores to use )")   
 	removeBasePath_ptr := flag.String("removeBasePath", "----", "remove base path")  
 	configFile_ptr := flag.String("configFile", "----", "config file path")  
-
+	ignorePathConfig_ptr := flag.String("ignorePathConfig", "----", "ignore path config file path")  
+	ignorePathNoWalkConfig_ptr := flag.String("ignorePathNoWalkConfig", "----", "ignore path no walk config file path")  
 
     flag.Usage = usage
 	flag.Parse()                 // args are pointers because this function needs it
@@ -140,6 +161,11 @@ func main() {
 	if r := re1.FindAllStringSubmatch(cf, -1); r != nil { paraCount, err = strconv.Atoi(r[0][2]) }
 	re1, err = regexp.Compile(`(?m)^(removeBasePath)="(.*)"`)
 	if r := re1.FindAllStringSubmatch(cf, -1); r != nil { removeBasePath, _ = strconv.ParseBool(r[0][2]) }
+	re1, err = regexp.Compile(`(?m)^(ignorePathConfig)="(.*)"`)
+	if r := re1.FindAllStringSubmatch(cf, -1); r != nil { config.ignorePathConfig = r[0][2] }
+	re1, err = regexp.Compile(`(?m)^(ignorePathNoWalkConfig)="(.*)"`)
+	if r := re1.FindAllStringSubmatch(cf, -1); r != nil { config.ignorePathNoWalkConfig = r[0][2] }
+
 
     /*
 		- CLI args override config file options here
@@ -152,7 +178,16 @@ func main() {
 	if *host_ptr != "----"       { host       = *host_ptr }
 	if *path_ptr != "----"       { path       = *path_ptr }
 	if *paraCount_ptr != "----"  { paraCount, _ = strconv.Atoi(*paraCount_ptr) }
-    if *removeBasePath_ptr != "----" { removeBasePath, _ = strconv.ParseBool(*removeBasePath_ptr) }
+    if *removeBasePath_ptr != "----"         { removeBasePath, _ = strconv.ParseBool(*removeBasePath_ptr) }
+	if *ignorePathConfig_ptr != "----"       { config.ignorePathConfig       = *ignorePathConfig_ptr }
+	if *ignorePathNoWalkConfig_ptr != "----" { config.ignorePathNoWalkConfig       = *ignorePathNoWalkConfig_ptr }
+
+
+
+    loadConfigsOther(config.ignorePathConfig, &config.ignorePath)            // load other configs ( exclude files)
+	loadConfigsOther(config.ignorePathNoWalkConfig, &config.ignorePathNoWalk)// load other configs ( exclude files)
+
+
 
     switch action {
 		case "scan":
@@ -162,9 +197,9 @@ func main() {
 			} else {
                 fileMap := SafeFileMap{v: make(map[string]string)}
 		    	fmt.Printf("ParaCount: %v\n\n",paraCount)
-                parallelFileCheck(&fileMap, paraCount, path)
+                parallelFileCheck(config, &fileMap, paraCount, path)
 		    	fmt.Printf("test %s, %s, %s, %s",reportName, host, path, reportDir)
-		        saveToDB(reportName, host, path, &fileMap)
+		        saveToDB(config, reportName, host, path, &fileMap)
 			}
 		case "list":	
 			listReports()
@@ -173,7 +208,7 @@ func main() {
 			listReportData(id1)
 			
 		case "compare":
-    	    compareReports(id1, id2, removeBasePath)  
+    	    compareReports(config, id1, id2, removeBasePath)  
 	/*
 		case "server":
 		    startServer()
@@ -181,4 +216,28 @@ func main() {
 			usage()
     */
     }
+}
+
+
+
+
+func loadConfigsOther(cPath string, cList *[]*regexp.Regexp) {
+
+	if _, err := os.Stat(cPath); err != nil { fmt.Println("ERROR - Error checking file:", err) }
+
+	file, err := os.Open(cPath)
+	if err != nil { fmt.Println("ERROR - opening file:", err); return }
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue // skip empty or commented lines
+		}
+		re1, _ := regexp.Compile(line)
+		*cList = append(*cList, re1)
+	}
+
+	if err := scanner.Err(); err != nil { fmt.Println("ERROR - reading file:", err); return }
 }

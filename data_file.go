@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-func saveToDBFile(reportName string, host string, path string, fileMap *SafeFileMap){
+func saveToDBFile(config configInfo, reportName string, host string, path string, fileMap *SafeFileMap){
 	fileMap.mux.Lock()
 
 	_, e1 := os.Stat(reportDir)
