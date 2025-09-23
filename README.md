@@ -5,6 +5,7 @@
 
 		- list reports returns imediately
 		- scan runs in BG ( need to break this off )
+		    - if still connected receive message back
         - show scan is currently running  ( scan status command )
 		- don't run when a scan or compare is already running
 		
