@@ -68,7 +68,6 @@ func listReportsFile(config configInfo)(string){
 
 
 func listReportDataFile(config configInfo, id1 string){
-
     f, err := os.Open(config.reportDir + "/" + id1)
     if err != nil {
         panic(err)
@@ -81,6 +80,24 @@ func listReportDataFile(config configInfo, id1 string){
     if err := s.Err(); err != nil {
         panic(err)
     }
+}
+
+// listReportDataStringFile returns the report file contents as a string.
+func listReportDataStringFile(config configInfo, id1 string) string {
+    f, err := os.Open(config.reportDir + "/" + id1)
+    if err != nil {
+        return "ERROR - " + err.Error() + "\n"
+    }
+    defer f.Close()
+    var sb strings.Builder
+    s := bufio.NewScanner(f)
+    for s.Scan() {
+        sb.WriteString(s.Text() + "\n")
+    }
+    if err := s.Err(); err != nil {
+        return "ERROR - " + err.Error() + "\n"
+    }
+    return sb.String()
 }
 
 func reportStatFile(config configInfo, reportNamePath string)(reportHeader){

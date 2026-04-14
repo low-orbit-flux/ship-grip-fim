@@ -7,7 +7,9 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
+	"strings"
 	"sync"
+	"time"
 )
 
 
@@ -137,19 +139,21 @@ type compareReport struct {
 	movedFiles []move
 }
 
-func compareReports(config configInfo, oldReportName string, newReportName string ){ 
+// buildCompareReport loads two reports and returns the diff result plus headers.
+// It is shared by compareReports (CLI) and compareReportsString (agent).
+func buildCompareReport(config configInfo, oldReportName string, newReportName string) (compareReport, reportHeader, reportHeader) {
 	oldReport := make(map[string]string)
-	newReport := make(map[string]string)  
+	newReport := make(map[string]string)
 
 	cr := compareReport{
-        newFiles:     make(map[string]string),
-        missingFiles: make(map[string]string),
-        changedFiles: []change{},
-        movedFiles:   []move{},
-    }
+		newFiles:     make(map[string]string),
+		missingFiles: make(map[string]string),
+		changedFiles: []change{},
+		movedFiles:   []move{},
+	}
 
-	oh := reportStatFile(config, oldReportName) // old header
-	nh := reportStatFile(config, newReportName) // new header
+	oh := reportStatFile(config, oldReportName)
+	nh := reportStatFile(config, newReportName)
 
 	compareReportsData(config, oldReportName, newReportName, oldReport, newReport, oh, nh)
 
@@ -158,61 +162,92 @@ func compareReports(config configInfo, oldReportName string, newReportName strin
 	for k, v := range oldReport {
 		if v2, ok := newReport[k]; ok {
 			if v2 != v {
-				//fmt.Printf("ERROR - hashes don't match: %v  %v  %v\n", k, v, v2)
-			    for _, p := range config.ignorePath {             // don't keep if on the exclude list  ( check here so we don't have to loop the entire report )
-                    if !p.MatchString(k) {
-						cr.changedFiles = append(cr.changedFiles, change{ path: k, oldHash: v, newHash: v2 })
-		            } 
-		        }
-				
+				for _, p := range config.ignorePath {
+					if !p.MatchString(k) {
+						cr.changedFiles = append(cr.changedFiles, change{path: k, oldHash: v, newHash: v2})
+					}
+				}
 			}
-			delete(newReport, k)           // delete, anything left is a newly found file
+			delete(newReport, k)
 		} else {
-			//fmt.Printf("ERROR - missing file: %v\n", k)
-			for _, p := range config.ignorePath {             // don't keep if on the exclude list  ( check here so we don't have to loop the entire report )
-                if !p.MatchString(k) {
-			        cr.missingFiles[k] = v			
-				} 
-	        }
-			
-		}
-    }
-	for k, v := range newReport {                // anything left is new
-		//fmt.Printf("NEW FILE: %v - %v\n", k, v)
-		for _, p := range config.ignorePath {             // don't keep if on the exclude list  ( check here so we don't have to loop the entire report )
-            if !p.MatchString(k) {
-		        cr.newFiles[k] = v	
-		    } 
+			for _, p := range config.ignorePath {
+				if !p.MatchString(k) {
+					cr.missingFiles[k] = v
+				}
+			}
 		}
 	}
-
+	for k, v := range newReport {
+		for _, p := range config.ignorePath {
+			if !p.MatchString(k) {
+				cr.newFiles[k] = v
+			}
+		}
+	}
 
 	for k, v := range cr.missingFiles {
-		for k2, v2 := range cr.newFiles {   // loop entire thing, looking for vals not keys, can't compare by path for this
-            if v == v2 {                    // hashes match
-                cr.movedFiles = append(cr.movedFiles, move{oldPath: k, newPath: k2, hash: v}) // add to moved
+		for k2, v2 := range cr.newFiles {
+			if v == v2 {
+				cr.movedFiles = append(cr.movedFiles, move{oldPath: k, newPath: k2, hash: v})
 			}
 		}
-
-	
 	}
-	for _, v := range cr.movedFiles{                    // perfer to do it this way for now
+	for _, v := range cr.movedFiles {
 		if _, ok := cr.missingFiles[v.oldPath]; ok {
-            delete(cr.missingFiles, v.oldPath)  		// remove from old files
+			delete(cr.missingFiles, v.oldPath)
 		}
-        if _, ok := cr.newFiles[v.newPath]; ok {         // remove from new files
-            delete(cr.newFiles, v.newPath)
+		if _, ok := cr.newFiles[v.newPath]; ok {
+			delete(cr.newFiles, v.newPath)
 		}
 	}
 
+	// Record stats for the metrics endpoint.
+	state.mu.Lock()
+	state.lastCompare = &compareStats{
+		OldReport: oldReportName,
+		NewReport: newReportName,
+		Timestamp: time.Now(),
+		Changed:   len(cr.changedFiles),
+		Added:     len(cr.newFiles),
+		Missing:   len(cr.missingFiles),
+		Moved:     len(cr.movedFiles),
+	}
+	state.mu.Unlock()
 
+	return cr, oh, nh
+}
 
+// compareReports runs the comparison for the local CLI (prints to stdout, saves to file).
+func compareReports(config configInfo, oldReportName string, newReportName string) {
+	cr, oh, nh := buildCompareReport(config, oldReportName, newReportName)
 	compareReportName := "compare__" + oldReportName + "__" + newReportName
 	saveCompare(config, compareReportName, oh, nh, cr)
 	fmt.Printf("\n[Completed]\n\n")
-	
+}
 
+// compareReportsString runs the comparison for the agent, returning the diff
+// output as a string while still saving the compare report file.
+func compareReportsString(config configInfo, oldReportName string, newReportName string) string {
+	cr, oh, nh := buildCompareReport(config, oldReportName, newReportName)
+	compareReportName := "compare__" + oldReportName + "__" + newReportName
+	saveCompare(config, compareReportName, oh, nh, cr)
 
+	var sb strings.Builder
+	sb.WriteString("Old: " + oh.name + "," + oh.time + "," + oh.host + "," + oh.path + "\n")
+	sb.WriteString("New: " + nh.name + "," + nh.time + "," + nh.host + "," + nh.path + "\n\n")
+	for k, v := range cr.newFiles {
+		sb.WriteString("NEW - " + k + " - " + v + "\n")
+	}
+	for k, v := range cr.missingFiles {
+		sb.WriteString("MISSING - " + k + " - " + v + "\n")
+	}
+	for _, v := range cr.changedFiles {
+		sb.WriteString("CHANGED - " + v.path + " - " + v.oldHash + " ==> " + v.newHash + "\n")
+	}
+	for _, v := range cr.movedFiles {
+		sb.WriteString("MOVED - " + v.oldPath + " ==> " + v.newPath + " - " + v.hash + "\n")
+	}
+	return sb.String()
 }
 
   

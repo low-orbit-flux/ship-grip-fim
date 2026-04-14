@@ -37,12 +37,19 @@ func listReports(config configInfo)(string){
 
 
 func listReportData(config configInfo, id1 string){
-	if config.dataSource == "file" {	
+	if config.dataSource == "file" {
 		listReportDataFile(config, id1)
 	}else {
 		fmt.Printf("ERROR - no valid data source specified")
 	}
+}
 
+// listReportDataString returns the report contents as a string (used by agent).
+func listReportDataString(config configInfo, id1 string) string {
+	if config.dataSource == "file" {
+		return listReportDataStringFile(config, id1)
+	}
+	return "ERROR - no valid data source specified\n"
 }
 
 
