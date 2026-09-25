@@ -202,6 +202,12 @@ func handleConnection(config configInfo, cc *clientConn) {
 				cc.done()
 			}()
 
+		case "quickcompare":
+			// Find the two most recent reports that share config.reportName and compare them.
+			output := quickCompareString(config)
+			cc.write(output)
+			cc.done()
+
 		case "status":
 			state.mu.Lock()
 			sr := state.scanRunning

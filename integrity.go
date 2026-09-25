@@ -47,6 +47,8 @@ type configInfo struct {
 	scheduleConfig string
 	exporterHost   string
 	exporterPort   string
+	webHost        string
+	webPort        string
 	test string
 }
 
@@ -66,6 +68,8 @@ Usage:
     ship-grip-fim remoteall <command> [args...]
     ship-grip-fim start [alias]
     ship-grip-fim exporter
+    ship-grip-fim webgui
+    ship-grip-fim quickcompare
 
     ship-grip-fim --removeBasePath=true compare default_adhoc_report_2025-09-15_23:09:49 default_adhoc_report_2025-09-15_23:10:28
 
@@ -77,6 +81,9 @@ Usage:
     agent     - Start the remote agent server (listens on agentHost:agentPort from config).
     exporter  - Start the Prometheus metrics exporter (scrapes all agents in hosts.conf,
                 listens on exporterHost:exporterPort, default 0.0.0.0:9110).
+    webgui    - Start the browser-based GUI (same features as desktop GUI).
+                Listens on webHost:webPort, default localhost:8090.
+    quickcompare - Find the two most recent reports sharing --reportName and compare them.
     remote    - Connect to a running agent and run a command.
                 Commands: scan, list, data <ID>, fetch <ID>, compare <ID> <ID>, status
                 Example:  ship-grip-fim remote localhost 8080 compare id1 id2
@@ -130,6 +137,8 @@ func main() {
 		scheduleConfig: "schedule.conf",
 		exporterHost:   "0.0.0.0",
 		exporterPort:   "9110",
+		webHost:        "localhost",
+		webPort:        "8090",
     }
 
 
@@ -150,6 +159,8 @@ func main() {
 	scheduleConfig_ptr := flag.String("scheduleConfig", "----", "agent schedule config file path")
 	exporterHost_ptr   := flag.String("exporterHost",   "----", "Prometheus exporter bind address")
 	exporterPort_ptr   := flag.String("exporterPort",   "----", "Prometheus exporter port")
+	webHost_ptr        := flag.String("webHost",        "----", "web GUI bind address")
+	webPort_ptr        := flag.String("webPort",        "----", "web GUI port")
 
     flag.Usage = usage
 	flag.Parse()                 // args are pointers because this function needs it
@@ -213,6 +224,10 @@ func main() {
 	if r := re1.FindAllStringSubmatch(cf, -1); r != nil { config.exporterHost = r[0][2] }
 	re1, err = regexp.Compile(`(?m)^(exporterPort)="(.*)"`)
 	if r := re1.FindAllStringSubmatch(cf, -1); r != nil { config.exporterPort = r[0][2] }
+	re1, err = regexp.Compile(`(?m)^(webHost)="(.*)"`)
+	if r := re1.FindAllStringSubmatch(cf, -1); r != nil { config.webHost = r[0][2] }
+	re1, err = regexp.Compile(`(?m)^(webPort)="(.*)"`)
+	if r := re1.FindAllStringSubmatch(cf, -1); r != nil { config.webPort = r[0][2] }
 	_ = err
 
 
@@ -236,6 +251,8 @@ func main() {
 	if *scheduleConfig_ptr != "----"        { config.scheduleConfig         = *scheduleConfig_ptr }
 	if *exporterHost_ptr != "----"          { config.exporterHost           = *exporterHost_ptr }
 	if *exporterPort_ptr != "----"          { config.exporterPort           = *exporterPort_ptr }
+	if *webHost_ptr != "----"              { config.webHost                = *webHost_ptr }
+	if *webPort_ptr != "----"              { config.webPort                = *webPort_ptr }
 
 
 
@@ -289,6 +306,12 @@ func main() {
 
 		case "exporter":
 		    startExporter(config)
+
+		case "webgui":
+		    startWebGUI(config)
+
+		case "quickcompare":
+		    cmdQuickCompare(config)
 
 		default:
 			usage()

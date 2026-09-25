@@ -157,6 +157,17 @@ func makeLocalTab(config configInfo) fyne.CanvasObject {
 	})
 	scanBtn.Importance = widget.HighImportance
 
+	quickCompareBtn := widget.NewButton("⚡  Quick Compare", func() {
+		statusLabel.SetText("Comparing last two reports…")
+		cfg := currentConfig()
+		go func() {
+			result := quickCompareString(cfg)
+			setText(output, result)
+			statusLabel.SetText("Quick compare complete")
+		}()
+	})
+	quickCompareBtn.Importance = widget.WarningImportance
+
 	refreshBtn := widget.NewButton("⟳  Refresh List", func() {
 		refreshList()
 		statusLabel.SetText("List refreshed")
@@ -210,7 +221,7 @@ func makeLocalTab(config configInfo) fyne.CanvasObject {
 			widget.NewLabel("Report Name:"),  reportNameEntry,
 			widget.NewLabel("Report Dir:"),   reportDirEntry,
 		),
-		container.NewHBox(scanBtn, refreshBtn, widget.NewSeparator(), statusLabel),
+		container.NewHBox(scanBtn, quickCompareBtn, refreshBtn, widget.NewSeparator(), statusLabel),
 	)
 
 	actionBar := container.NewHBox(
@@ -395,6 +406,17 @@ func makeRemoteTab(config configInfo) fyne.CanvasObject {
 	})
 	scanBtn.Importance = widget.HighImportance
 
+	remoteQCBtn := widget.NewButton("⚡  Quick Compare", func() {
+		h, p := addr()
+		statusLabel.SetText("Quick compare on remote…")
+		go func() {
+			result := runRemoteCommandToString(h, p, []string{"quickcompare"})
+			setText(output, result)
+			statusLabel.SetText("Quick compare complete")
+		}()
+	})
+	remoteQCBtn.Importance = widget.WarningImportance
+
 	viewBtn := widget.NewButton("View Data", func() {
 		if selectedRemote == "" {
 			setText(output, "Select a report first.")
@@ -440,7 +462,7 @@ func makeRemoteTab(config configInfo) fyne.CanvasObject {
 	topBar := container.NewHBox(
 		widget.NewLabel("Host:"), hostEntry,
 		widget.NewLabel("Port:"), portEntry,
-		statusBtn, listBtn, scanBtn,
+		statusBtn, listBtn, scanBtn, remoteQCBtn,
 		widget.NewSeparator(), statusLabel,
 	)
 
