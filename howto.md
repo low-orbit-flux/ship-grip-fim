@@ -432,7 +432,7 @@ agents with whatever credentials you enter on each tab.
 
 ### What is not covered
 
-- `start` and `scripts/deploy.sh` rely on your existing SSH keys.
+- `start`, `deploy` and `scripts/deploy.sh` rely on your existing SSH keys.
 - Sessions and the users file are per server; there is no central directory.
 
 ## Build and deploy
@@ -451,6 +451,35 @@ scripts/deploy.sh --local=/srv/fim --service   # ...into a chosen dir, as a syst
 only when they are missing on the host (it never overwrites `users.db`,
 `agent.crt` or `agent.key`), restarts the agent from the binary's directory and
 pins the agent's TLS fingerprint in your local `known_agents`.
+
+### Deploying from the binary or the GUIs
+
+The remote part of `deploy.sh` is also built into the program, so it can run
+without the repository checkout:
+
+```
+ship-grip-fim deploy                    # every host with sshUser + binaryPath
+ship-grip-fim deploy homeserver         # one host
+ship-grip-fim deploy --no-restart       # copy files, leave agents running
+ship-grip-fim deploy --binary=/path/to/ship-grip-fim
+```
+
+The binary pushed is `build/ship-grip-fim` when it exists in the working
+directory, otherwise the running executable.  Each host needs `sshUser` and
+`binaryPath` in `hosts.conf`; hosts without them are skipped.
+
+Both GUIs expose the same thing on the **Hosts** tab: click a host row, then
+**Deploy Selected**, or use **Deploy All**.  The "Deploy binary" field and
+"restart agent" checkbox map to `--binary` and `--no-restart`, and the
+progress (files copied, fingerprint pinned, agent restarted) shows in the
+output box.  In the web GUI deploying needs the `admin` role and runs in the
+background on the server, one deploy at a time; the page polls for progress.
+**Start Selected / Start All (SSH)** on the same tab only (re)start an agent
+that is already installed.
+
+Like `deploy.sh` and `start`, this uses the `ssh` and `scp` commands on the
+machine running the CLI or GUI with that user's keys, so the host must already
+be in `~/.ssh/known_hosts` there (`BatchMode` never prompts).
 
 To run the agent as a service, see the comments in
 `scripts/ship-grip-fim-agent.service`.

@@ -78,6 +78,7 @@ Usage:
     ship-grip-fim sync [alias]
     ship-grip-fim remoteall <command> [args...]
     ship-grip-fim start [alias]
+    ship-grip-fim deploy [alias] [--no-restart] [--binary=PATH]
     ship-grip-fim exporter
     ship-grip-fim webgui
     ship-grip-fim quickcompare
@@ -110,6 +111,11 @@ Usage:
     gui       - Open the graphical interface (requires a display).
     start     - Start the agent on one (alias) or all remote hosts via SSH.
                 Requires sshUser and binaryPath set in hosts.conf.
+    deploy    - Copy the binary (default build/ship-grip-fim, else this
+                executable) to one (alias) or all hosts over SSH, install the
+                config files if missing, pin the agent's TLS fingerprint in
+                knownAgents and restart the agent.  Same as scripts/deploy.sh;
+                also available on the Hosts tab of both GUIs.
     user      - Manage the local agent users file (usersDB).  To manage a remote
                 agent's users:  ship-grip-fim remote <host> <port> user add bob s3cretpass
     fingerprint - Print the local agent's TLS certificate fingerprint (for
@@ -488,6 +494,12 @@ func main() {
 			alias = positional[1]
 		}
 		cmdStartAgent(config, alias)
+
+	case "deploy":
+		if err := cmdDeploy(config, positional[1:]); err != nil {
+			fmt.Println("ERROR -", err)
+			os.Exit(1)
+		}
 
 	case "exporter":
 		startExporter(config)

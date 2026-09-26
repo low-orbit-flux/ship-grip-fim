@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -177,26 +178,31 @@ func cmdRemoteAll(config configInfo, cmdArgs []string) {
 // cmdStartAgent starts the agent on one host (by alias) or all hosts if alias == "".
 // Requires sshUser and binaryPath set in hosts.conf.
 func cmdStartAgent(config configInfo, alias string) {
+	startAgents(config, alias, os.Stdout)
+}
+
+// startAgents is cmdStartAgent with the progress written to out.
+func startAgents(config configInfo, alias string, out io.Writer) {
 	hosts, err := parseHostsConfig(config.hostsConfig)
 	if err != nil {
-		fmt.Println("ERROR - reading hosts config:", err)
+		fmt.Fprintln(out, "ERROR - reading hosts config:", err)
 		return
 	}
 	found := false
 	for _, h := range hosts {
 		if alias == "" || h.alias == alias {
 			found = true
-			startAgentOnHost(h)
+			startAgentOnHost(h, out)
 		}
 	}
 	if !found {
-		fmt.Println("ERROR - no host found with alias:", alias)
+		fmt.Fprintln(out, "ERROR - no host found with alias:", alias)
 	}
 }
 
-func startAgentOnHost(h remoteHost) {
+func startAgentOnHost(h remoteHost, out io.Writer) {
 	if h.sshUser == "" || h.binaryPath == "" {
-		fmt.Printf("[%s] ERROR - sshUser and binaryPath must be set in hosts.conf to use 'start'\n", h.alias)
+		fmt.Fprintf(out, "[%s] ERROR - sshUser and binaryPath must be set in hosts.conf to use 'start'\n", h.alias)
 		return
 	}
 	target := h.sshUser + "@" + h.address
@@ -204,15 +210,15 @@ func startAgentOnHost(h remoteHost) {
 	// certificate files are found next to it; log beside the binary too.
 	dir := filepath.Dir(h.binaryPath)
 	remoteCmd := fmt.Sprintf(
-		"cd %q && nohup %q --agentHost=0.0.0.0 --agentPort=%s agent > agent.log 2>&1 &",
+		"cd %q && nohup %q --agentHost=0.0.0.0 --agentPort=%s agent > agent.log 2>&1 < /dev/null &",
 		dir, h.binaryPath, h.port,
 	)
-	fmt.Printf("[%s] Starting agent on %s ...\n", h.alias, target)
+	fmt.Fprintf(out, "[%s] Starting agent on %s ...\n", h.alias, target)
 	cmd := exec.Command("ssh", "-o", "BatchMode=yes", target, remoteCmd)
-	out, err := cmd.CombinedOutput()
+	o, err := cmd.CombinedOutput()
 	if err != nil {
-		fmt.Printf("[%s] ERROR - ssh failed: %v\n%s\n", h.alias, err, string(out))
+		fmt.Fprintf(out, "[%s] ERROR - ssh failed: %v\n%s\n", h.alias, err, string(o))
 		return
 	}
-	fmt.Printf("[%s] Agent started (port %s, log: %s/agent.log)\n", h.alias, h.port, dir)
+	fmt.Fprintf(out, "[%s] Agent started (port %s, log: %s/agent.log)\n", h.alias, h.port, dir)
 }

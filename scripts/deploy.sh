@@ -115,8 +115,11 @@ while IFS='|' read -r alias address port path reportName sshUser binaryPath rest
   done
 
   if [[ $RESTART -eq 1 ]]; then
-    ssh -o BatchMode=yes "$target" "pkill -f '$binaryPath.* agent' >/dev/null 2>&1 || true; sleep 1; \
-      cd '$dir' && nohup '$binaryPath' --agentHost=0.0.0.0 --agentPort=$port agent > agent.log 2>&1 &"
+    # Stop and start are separate ssh calls, and the pattern brackets the last
+    # character of the binary name: otherwise pkill -f matches the remote
+    # shell's own command line and kills it before nohup runs.
+    ssh -o BatchMode=yes "$target" "pkill -f '${binaryPath%?}[${binaryPath: -1}].* agent' >/dev/null 2>&1; sleep 1; true"
+    ssh -o BatchMode=yes "$target" "cd '$dir' && nohup '$binaryPath' --agentHost=0.0.0.0 --agentPort=$port agent > agent.log 2>&1 < /dev/null &"
     echo "[$alias]   agent restarted on port $port (log: $dir/agent.log)"
   fi
 

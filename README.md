@@ -67,6 +67,8 @@ Build and Run:
 
  scripts/deploy.sh [alias]     # push the binary to hosts.conf hosts over SSH,
                                # restart their agents and pin their TLS fingerprints
+ ./build/ship-grip-fim deploy [alias]   # the same, built into the binary; also on
+                                        # the Hosts tab of the desktop and web GUIs
  scripts/ship-grip-fim-agent.service   # systemd unit for the agent
 
 Security ( see howto.md, "Security" ):

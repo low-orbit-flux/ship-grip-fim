@@ -562,9 +562,9 @@ func makeHostsTab(config configInfo) fyne.CanvasObject {
 
 	// ── hosts table ──
 	// Row 0 is the header; data rows start at 1.
-	const numCols = 6
-	colHeaders := []string{"Alias", "Address", "Port", "Path", "Report Name", "SSH User"}
-	colWidths := []float32{120, 160, 60, 200, 160, 100}
+	const numCols = 7
+	colHeaders := []string{"Alias", "Address", "Port", "Path", "Report Name", "SSH User", "Binary Path"}
+	colWidths := []float32{120, 160, 60, 200, 160, 100, 220}
 
 	hostsTable := widget.NewTable(
 		func() (int, int) {
@@ -586,12 +586,26 @@ func makeHostsTab(config configInfo) fyne.CanvasObject {
 			hostsMu.Lock()
 			h := hosts[id.Row-1]
 			hostsMu.Unlock()
-			vals := []string{h.alias, h.address, h.port, h.path, h.reportName, h.sshUser}
+			vals := []string{h.alias, h.address, h.port, h.path, h.reportName, h.sshUser, h.binaryPath}
 			lbl.SetText(vals[id.Col])
 		},
 	)
 	for i, w := range colWidths {
 		hostsTable.SetColumnWidth(i, w)
+	}
+
+	// Clicking a row selects that host for the "Selected" SSH actions.
+	var selectedAlias string
+	hostsTable.OnSelected = func(id widget.TableCellID) {
+		if id.Row == 0 {
+			return
+		}
+		hostsMu.Lock()
+		if id.Row-1 < len(hosts) {
+			selectedAlias = hosts[id.Row-1].alias
+		}
+		hostsMu.Unlock()
+		statusLabel.SetText("Selected: " + selectedAlias)
 	}
 
 	currentCfg := func() configInfo {
@@ -722,8 +736,41 @@ func makeHostsTab(config configInfo) fyne.CanvasObject {
 		}()
 	})
 
-	// ── start agents via SSH ──
-	startAllBtn := widget.NewButton("Start All (SSH)", func() {
+	// ── start / deploy agents via SSH ──
+	// Output from the SSH helpers lands in the output box instead of stdout.
+	startVia := func(alias string) {
+		hostsMu.Lock()
+		n := len(hosts)
+		hostsMu.Unlock()
+		if n == 0 {
+			setText(output, "No hosts loaded.")
+			return
+		}
+		cfg := currentCfg()
+		statusLabel.SetText("Starting agents…")
+		setText(output, "")
+		go func() {
+			startAgents(cfg, alias, entryWriter{output})
+			fyne.Do(func() { statusLabel.SetText("Start commands sent") })
+		}()
+	}
+	startSelBtn := widget.NewButton("Start Selected (SSH)", func() {
+		if selectedAlias == "" {
+			setText(output, "Select a host in the table first.")
+			return
+		}
+		startVia(selectedAlias)
+	})
+	startAllBtn := widget.NewButton("Start All (SSH)", func() { startVia("") })
+
+	binaryEntry := widget.NewEntry()
+	binaryEntry.SetText(defaultDeployBinary())
+	binaryEntry.SetPlaceHolder("local binary to deploy")
+	restartCheck := widget.NewCheck("Restart agent", nil)
+	restartCheck.SetChecked(true)
+
+	var deploying bool
+	deployVia := func(alias string) {
 		hostsMu.Lock()
 		snapshot := append([]remoteHost(nil), hosts...)
 		hostsMu.Unlock()
@@ -731,13 +778,37 @@ func makeHostsTab(config configInfo) fyne.CanvasObject {
 			setText(output, "No hosts loaded.")
 			return
 		}
+		if deploying {
+			appendText(output, "A deploy is already running.\n")
+			return
+		}
+		deploying = true
 		cfg := currentCfg()
-		statusLabel.SetText("Starting agents…")
+		opts := deployOptions{binary: binaryEntry.Text, restart: restartCheck.Checked}
+		statusLabel.SetText("Deploying…")
+		setText(output, "")
 		go func() {
-			cmdStartAgent(cfg, "") // empty alias = all hosts
-			fyne.Do(func() { statusLabel.SetText("Start commands sent") })
+			err := deployHosts(cfg, snapshot, alias, opts, entryWriter{output})
+			fyne.Do(func() {
+				deploying = false
+				if err != nil {
+					appendText(output, "ERROR - "+err.Error()+"\n")
+					statusLabel.SetText("Deploy failed")
+				} else {
+					statusLabel.SetText("Deploy complete")
+				}
+			})
 		}()
+	}
+	deploySelBtn := widget.NewButton("Deploy Selected", func() {
+		if selectedAlias == "" {
+			setText(output, "Select a host in the table first.")
+			return
+		}
+		deployVia(selectedAlias)
 	})
+	deployAllBtn := widget.NewButton("Deploy All", func() { deployVia("") })
+	deployAllBtn.Importance = widget.HighImportance
 
 	clearBtn := widget.NewButton("Clear", func() { setText(output, "") })
 
@@ -748,11 +819,20 @@ func makeHostsTab(config configInfo) fyne.CanvasObject {
 	)
 
 	actionBar := container.NewHBox(
-		pingAllBtn, syncAllBtn, startAllBtn,
+		pingAllBtn, syncAllBtn, startSelBtn, startAllBtn,
 		widget.NewSeparator(),
 		widget.NewLabel("Cmd:"), cmdEntry, runAllBtn,
 		widget.NewSeparator(),
 		clearBtn,
+	)
+
+	// Deploy over SSH: copies the binary to each host's binaryPath, installs
+	// missing config files, pins the agent fingerprint and restarts the agent
+	// (the Go version of scripts/deploy.sh).
+	deployBar := container.NewBorder(nil, nil,
+		widget.NewLabel("Deploy binary:"),
+		container.NewHBox(restartCheck, deploySelBtn, deployAllBtn),
+		binaryEntry,
 	)
 
 	split := container.NewVSplit(
@@ -763,7 +843,17 @@ func makeHostsTab(config configInfo) fyne.CanvasObject {
 
 	loadHosts() // try to load on startup
 
-	return container.NewBorder(topBar, actionBar, nil, nil, split)
+	return container.NewBorder(topBar, container.NewVBox(actionBar, deployBar), nil, nil, split)
+}
+
+// entryWriter is an io.Writer that appends to a read-only entry from any
+// goroutine, so background SSH work can stream its progress into the GUI.
+type entryWriter struct{ e *widget.Entry }
+
+func (w entryWriter) Write(p []byte) (int, error) {
+	s := string(p)
+	fyne.Do(func() { appendText(w.e, s) })
+	return len(p), nil
 }
 
 // ── Tab 5: Schedule ───────────────────────────────────────────────────────────

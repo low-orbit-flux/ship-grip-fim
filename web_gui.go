@@ -59,6 +59,7 @@ func startWebGUI(config configInfo) {
 	mux.HandleFunc("/api/agent/stop", rw(webAgentStop))
 	mux.HandleFunc("/api/hosts/sync", rw(h(webSyncAll)))
 	mux.HandleFunc("/api/hosts/start", rw(h(webStartAll)))
+	mux.HandleFunc("/api/hosts/deploy", admin(h(webDeployHosts))) // GET: progress, POST: start
 
 	mux.HandleFunc("/api/users", admin(h(webUsers)))
 
@@ -148,6 +149,7 @@ func webIndex(config configInfo, w http.ResponseWriter, r *http.Request) {
 		"AgentUser":  config.agentUser,
 		"AgentPass":  config.agentPassword,
 		"UsersDB":    config.usersDB,
+		"DeployBin":  defaultDeployBinary(),
 	})
 }
 
@@ -407,10 +409,11 @@ func webHosts(config configInfo, w http.ResponseWriter, r *http.Request) {
 		Path       string `json:"path"`
 		ReportName string `json:"reportName"`
 		SSHUser    string `json:"sshUser"`
+		BinaryPath string `json:"binaryPath"`
 	}
 	out := make([]hj, len(hosts))
 	for i, h := range hosts {
-		out[i] = hj{h.alias, h.address, h.port, h.path, h.reportName, h.sshUser}
+		out[i] = hj{h.alias, h.address, h.port, h.path, h.reportName, h.sshUser, h.binaryPath}
 	}
 	wJSON(w, map[string]interface{}{"hosts": out})
 }
@@ -445,12 +448,50 @@ func webSyncAll(config configInfo, w http.ResponseWriter, r *http.Request) {
 	wJSON(w, map[string]string{"output": sb.String()})
 }
 
+// webStartAll starts the agent over SSH on one host (alias) or all hosts and
+// returns the SSH output.
 func webStartAll(config configInfo, w http.ResponseWriter, r *http.Request) {
 	if !requirePost(w, r) {
 		return
 	}
-	go cmdStartAgent(config, "")
-	wJSON(w, map[string]string{"msg": "Start commands sent to all hosts (check server log for SSH output)"})
+	var req struct {
+		Alias string `json:"alias"`
+	}
+	wDecode(r, &req) //nolint:errcheck
+	var sb strings.Builder
+	startAgents(config, req.Alias, &sb)
+	wJSON(w, map[string]string{"output": sb.String()})
+}
+
+// webDeployHosts runs scripts/deploy.sh's job from the web GUI.  POST starts
+// a deploy in the background (one at a time); GET returns its progress so the
+// page can poll while scp and the restart run.
+func webDeployHosts(config configInfo, w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet {
+		running, out := webDeployJob.status()
+		wJSON(w, map[string]interface{}{"running": running, "output": out})
+		return
+	}
+	if !requirePost(w, r) {
+		return
+	}
+	var req struct {
+		Alias   string `json:"alias"`
+		Binary  string `json:"binary"`
+		Restart *bool  `json:"restart"`
+	}
+	wDecode(r, &req) //nolint:errcheck
+	hosts, err := parseHostsConfig(config.hostsConfig)
+	if err != nil {
+		wErr(w, err.Error(), 500)
+		return
+	}
+	opts := deployOptions{binary: req.Binary, restart: req.Restart == nil || *req.Restart}
+	if err := webDeployJob.start(config, hosts, req.Alias, opts); err != nil {
+		wErr(w, err.Error(), 409)
+		return
+	}
+	wJSON(w, map[string]bool{"started": true})
 }
 
 func webRemoteAll(config configInfo, w http.ResponseWriter, r *http.Request) {
@@ -654,17 +695,25 @@ tr.sel td{background:#1a2a1a;color:#4ade80}
       <button class="btn s" onclick="hLoad()">&#x27F3; Refresh Hosts</button>
       <button class="btn s" onclick="hPing()">Ping All</button>
       <button class="btn s" data-need="rw" onclick="hSync()">Sync Reports</button>
-      <button class="btn s" data-need="rw" onclick="hStart()">Start All (SSH)</button>
+      <button class="btn s" data-need="rw" onclick="hStart(false)">Start Selected (SSH)</button>
+      <button class="btn s" data-need="rw" onclick="hStart(true)">Start All (SSH)</button>
       <span class="sep"></span>
       <input id="hcmd" class="inp inp-md" placeholder="command  e.g. scan, list, status">
       <button class="btn g" onclick="hAll()">Run on All</button>
       <span class="sep"></span>
       <span id="hst" class="bdg bi">—</span>
     </div>
+    <div class="row" style="margin-top:6px">
+      <label>Deploy&nbsp;binary</label><input id="hbin" class="inp inp-lg" data-need="admin" value="{{index . "DeployBin"}}" title="local binary copied to each host's binaryPath (needs sshUser + binaryPath in hosts.conf)">
+      <label><input type="checkbox" id="hrestart" data-need="admin" checked> restart agent</label>
+      <button class="btn g" data-need="admin" onclick="hDeploy(false)">Deploy Selected</button>
+      <button class="btn g" data-need="admin" onclick="hDeploy(true)">Deploy All</button>
+      <span class="ct" style="opacity:.7">copies the binary, installs missing config files, pins the fingerprint (click a row to select a host)</span>
+    </div>
   </div>
   <div class="card tw" style="flex:none;max-height:200px">
     <table>
-      <thead><tr><th>Alias</th><th>Address</th><th>Port</th><th>Path</th><th>Report Name</th><th>SSH User</th></tr></thead>
+      <thead><tr><th>Alias</th><th>Address</th><th>Port</th><th>Path</th><th>Report Name</th><th>SSH User</th><th>Binary Path</th></tr></thead>
       <tbody id="hhosts"></tbody>
     </table>
   </div>
@@ -953,12 +1002,14 @@ async function rQC(){
 // ═══════════════════════════════════════════════════════════════════
 // HOSTS TAB
 // ═══════════════════════════════════════════════════════════════════
+let hSel='';
 async function hLoad(){
   const d=await api('GET','/api/hosts');
   const tb=document.getElementById('hhosts');
-  tb.innerHTML='';
+  tb.innerHTML='';hSel='';
   (d.hosts||[]).forEach(h=>{
-    const tr=rowOf([h.alias,h.address,h.port,h.path,h.reportName,h.sshUser||'']);
+    const tr=rowOf([h.alias,h.address,h.port,h.path,h.reportName,h.sshUser||'',h.binaryPath||'']);
+    tr.onclick=()=>{tb.querySelectorAll('tr').forEach(x=>x.classList.remove('sel'));tr.classList.add('sel');hSel=h.alias;bdg('hst','selected: '+h.alias,'bi');};
     tb.appendChild(tr);
   });
   if(d.error)so('hout','ERROR: '+d.error);
@@ -974,10 +1025,24 @@ async function hSync(){
   const d=await api('POST','/api/hosts/sync',{});
   so('hout',d.output||d.error||'');bdg('hst','done','bi');
 }
-async function hStart(){
+async function hStart(all){
+  if(!all&&!hSel){so('hout','Click a host in the table first.');return;}
   bdg('hst','starting...','br');
-  const d=await api('POST','/api/hosts/start',{});
-  so('hout',d.msg||d.error||'');bdg('hst','done','bi');
+  const d=await api('POST','/api/hosts/start',{alias:all?'':hSel});
+  so('hout',d.output||d.error||'');bdg('hst','done','bi');
+}
+let _hdeploy=null;
+async function hDeploy(all){
+  if(!all&&!hSel){so('hout','Click a host in the table first.');return;}
+  const d=await api('POST','/api/hosts/deploy',{alias:all?'':hSel,binary:v('hbin'),restart:document.getElementById('hrestart').checked});
+  if(d.error){so('hout','ERROR: '+d.error);bdg('hst','error','br');return;}
+  bdg('hst','deploying...','br');so('hout','Deploying'+(all?' to all hosts':' to '+hSel)+'...\n');
+  if(_hdeploy)clearInterval(_hdeploy);
+  _hdeploy=setInterval(async()=>{
+    const s=await api('GET','/api/hosts/deploy');
+    if(s.output)so('hout',s.output);
+    if(!s.running){clearInterval(_hdeploy);_hdeploy=null;const bad=(s.output||'').includes('ERROR');bdg('hst',bad?'deploy failed':'deploy done',bad?'br':'bi');}
+  },1000);
 }
 async function hAll(){
   const cmdStr=document.getElementById('hcmd').value.trim();
