@@ -2,7 +2,7 @@ package main
 
 import (
 	"fmt"
-	"io/ioutil"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -12,7 +12,7 @@ import (
 // share the given reportName prefix, ordered oldest-first so callers can pass
 // them directly to compareReports(config, older, newer).
 func findLastTwoReports(config configInfo, reportName string) (older, newer string, err error) {
-	files, err := ioutil.ReadDir(config.reportDir)
+	files, err := os.ReadDir(config.reportDir)
 	if err != nil {
 		return "", "", fmt.Errorf("reading report dir %q: %w", config.reportDir, err)
 	}
@@ -48,14 +48,13 @@ func findLastTwoReports(config configInfo, reportName string) (older, newer stri
 }
 
 // cmdQuickCompare is the CLI handler for the "quickcompare" command.
-func cmdQuickCompare(config configInfo) {
+func cmdQuickCompare(config configInfo) error {
 	older, newer, err := findLastTwoReports(config, config.reportName)
 	if err != nil {
-		fmt.Println("ERROR -", err)
-		return
+		return err
 	}
 	fmt.Printf("Quick compare — report name: %q\n  older: %s\n  newer: %s\n\n", config.reportName, older, newer)
-	compareReports(config, older, newer)
+	return compareReports(config, older, newer)
 }
 
 // quickCompareString is the string-returning variant used by the agent server

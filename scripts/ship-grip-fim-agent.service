@@ -1,0 +1,28 @@
+# systemd unit for the ship-grip-fim agent.
+#
+#   sudo useradd -r -s /usr/sbin/nologin shipgrip          # or reuse an existing service account
+#   sudo mkdir -p /opt/ship-grip-fim && sudo chown shipgrip /opt/ship-grip-fim
+#   (deploy the binary + integrity.conf there, e.g. with scripts/deploy.sh)
+#   sudo cp scripts/ship-grip-fim-agent.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now ship-grip-fim-agent
+#
+# The agent must be able to read every path it scans; run it as root only if
+# that is genuinely required.
+[Unit]
+Description=ship-grip-fim file integrity agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=shipgrip
+WorkingDirectory=/opt/ship-grip-fim
+ExecStart=/opt/ship-grip-fim/ship-grip-fim --agentHost=0.0.0.0 agent
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/ship-grip-fim
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -9,7 +9,9 @@ import (
 
 // syncReports pulls all reports from one agent (by alias) or all configured
 // agents if alias == "".  Reports are stored at:
-//   <reportDir>/remote/<alias>/<report_filename>
+//
+//	<reportDir>/remote/<alias>/<report_filename>
+//
 // Already-present files are skipped (they are immutable once written).
 func syncReports(config configInfo, alias string) {
 	hosts, err := parseHostsConfig(config.hostsConfig)
@@ -32,17 +34,19 @@ func syncReports(config configInfo, alias string) {
 func syncHostReports(config configInfo, h remoteHost) {
 	fmt.Printf("[%s] Fetching report list from %s:%s ...\n", h.alias, h.address, h.port)
 
-	listOut := runRemoteCommandToString(h.address, h.port, []string{"list"})
+	cfg := hostConfig(config, h)
+	listOut := runRemoteCommandToString(cfg, h.address, h.port, []string{"list"})
 	if strings.HasPrefix(strings.TrimSpace(listOut), "ERROR") {
 		fmt.Printf("[%s] %s\n", h.alias, strings.TrimSpace(listOut))
 		return
 	}
 
-	// Parse report IDs — valid filenames have no whitespace.
+	// Parse report IDs.  validReportID also guards against a misbehaving
+	// agent returning names like "../../x" that would escape localDir.
 	var reportIDs []string
 	for _, line := range strings.Split(listOut, "\n") {
 		line = strings.TrimSpace(line)
-		if line == "" || strings.ContainsAny(line, " \t") || strings.HasPrefix(line, "-") {
+		if !validReportID(line) || strings.HasPrefix(line, "-") {
 			continue
 		}
 		reportIDs = append(reportIDs, line)
@@ -72,7 +76,7 @@ func syncHostReports(config configInfo, h remoteHost) {
 			continue
 		}
 
-		content := fetchRemoteReport(h.address, h.port, id)
+		content := fetchRemoteReport(cfg, h.address, h.port, id)
 		if strings.HasPrefix(strings.TrimSpace(content), "ERROR") {
 			fmt.Printf("[%s] ERROR fetching %s: %s\n", h.alias, id, strings.TrimSpace(content))
 			errCount++
@@ -94,6 +98,6 @@ func syncHostReports(config configInfo, h remoteHost) {
 
 // fetchRemoteReport uses the agent 'fetch' command to retrieve the raw contents
 // of a single report file.
-func fetchRemoteReport(address, port, reportID string) string {
-	return runRemoteCommandToString(address, port, []string{"fetch", reportID})
+func fetchRemoteReport(config configInfo, address, port, reportID string) string {
+	return runRemoteCommandToString(config, address, port, []string{"fetch", reportID})
 }

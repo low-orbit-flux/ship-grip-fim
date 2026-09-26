@@ -31,7 +31,7 @@ Display file paths and checksums from a report.
 ```bash
 ./ship-grip-fim data <REPORT_ID>
 # Example:
-./ship-grip-fim data default_adhoc_report_2025-09-15_23:09:49
+./ship-grip-fim data default_adhoc_report_2025-09-15_23-09-49
 ```
 
 ### compare
@@ -40,7 +40,7 @@ Compare two reports and show what changed, was added, removed, or moved.
 ```bash
 ./ship-grip-fim compare <REPORT_ID_1> <REPORT_ID_2>
 # Example:
-./ship-grip-fim compare default_adhoc_report_2025-09-15_23:09:49 default_adhoc_report_2025-09-15_23:10:28
+./ship-grip-fim compare default_adhoc_report_2025-09-15_23-09-49 default_adhoc_report_2025-09-15_23-10-28
 ```
 
 Output categories: `NEW`, `MISSING`, `CHANGED`, `MOVED`.
@@ -205,7 +205,7 @@ Connect to any running agent by host:port, then:
 Configure remote agents in `hosts.conf` (pipe-delimited, one per line):
 
 ```
-# alias|address|port|path|reportName[|sshUser[|binaryPath]]
+# alias|address|port|path|reportName[|sshUser[|binaryPath[|agentUser[|agentPassword]]]]
 server1|192.168.1.10|8080|/data|server1
 server2|192.168.1.20|9000|/storage|server2|admin|/usr/local/bin/ship-grip-fim
 ```
@@ -345,5 +345,112 @@ fim_scan_running == 1 and (time() - fim_last_scan_time_seconds) > 3600
 ./ship-grip-fim list
 
 # 4. Compare to detect drift
-./ship-grip-fim compare etc_2025-09-15_08:00:00 etc_2025-09-15_20:00:00
+./ship-grip-fim compare etc_2025-09-15_08-00-00 etc_2025-09-15_20-00-00
 ```
+
+## Security
+
+### Transport (TLS)
+
+Every agent connection uses TLS 1.3. There is nothing to configure:
+
+- On first start the agent generates a self-signed certificate (`agent.crt` /
+  `agent.key`, paths from `agentCert` / `agentKey`) and prints its fingerprint.
+- Clients do **not** use the system CA store. They pin the agent's SHA-256
+  fingerprint in `known_agents` (config `knownAgents`), the same way SSH uses
+  `known_hosts`:
+  - first connection to an address: the fingerprint is saved and a NOTICE is
+    printed (trust-on-first-use);
+  - later connections: refused if the fingerprint changes, with a message that
+    tells you which line to remove if the agent was legitimately reinstalled.
+- For a verified first connection instead of trust-on-first-use, either run
+  `scripts/deploy.sh` (it reads the fingerprint over SSH and pins it), or run
+  `ship-grip-fim fingerprint` on the agent host and add
+  `<address>:<port> SHA256:...` to `known_agents` by hand. Set
+  `trustNewAgents="false"` to refuse any agent that is not pinned.
+
+### Authentication and roles
+
+Every connection must log in before any command is accepted. Users live in
+`users.db` (config `usersDB`) as `name:role:bcrypt-hash`, one per line.
+
+| role    | may do                                                              |
+|---------|---------------------------------------------------------------------|
+| `ro`    | list, view and compare reports; view schedules, metrics and status |
+| `rw`    | `ro` + run scans, add/remove scheduled jobs, start/stop agents      |
+| `admin` | `rw` + manage users                                                  |
+
+Every user may change their own password (`user passwd <own-name> <new>`).
+The last admin cannot be removed or demoted.
+
+- A fresh agent creates the default user **`admin` / `changeme`** and warns on
+  every start (and reports `default_password=1` in metrics, `fim_default_password`
+  in the exporter) until it is changed.
+- Failed logins are delayed one second; passwords must be at least 8 characters;
+  the last user cannot be removed.
+- The credentials a client uses come from `agentUser` / `agentPassword` in
+  `integrity.conf`, optionally overridden per host in `hosts.conf` (fields 8
+  and 9), or by the `SGF_AGENT_PASSWORD` environment variable, which wins over
+  the config file so the password need not be stored on disk.
+
+Manage users on the machine that holds the file:
+
+```
+./ship-grip-fim user list
+./ship-grip-fim user add bob s3cret-pass            # role defaults to ro
+./ship-grip-fim user add ops ops-pass-word rw
+./ship-grip-fim user role bob rw
+./ship-grip-fim user passwd admin new-long-password
+./ship-grip-fim user remove bob
+```
+
+Manage a remote agent's users through the agent (log in with any existing
+user, e.g. the default one on a fresh install):
+
+```
+./ship-grip-fim remote 192.168.1.10 8080 user passwd admin new-long-password
+./ship-grip-fim remote 192.168.1.10 8080 user add bob s3cret-pass
+./ship-grip-fim remoteall user list
+```
+
+Both GUIs have a **Users** tab with the same operations, switchable between the
+local file and a remote agent, and user/password fields next to host/port on
+the Remote and Schedule tabs.
+
+### Web GUI login
+
+The web GUI requires a login against the same `users.db` and applies the same
+roles (buttons a role may not use are greyed out; the server enforces it too).
+It is served over HTTPS with the agent certificate (`webTLS="true"`, the
+default), so it can be run once on a central server (`webHost="0.0.0.0"`) and
+used from any browser without installing anything. The browser will warn about
+the self-signed certificate on first use; compare the fingerprint printed at
+startup. Sessions last 12 hours and end on restart.
+
+The desktop GUI (`gui`) runs as you and needs no login of its own; it talks to
+agents with whatever credentials you enter on each tab.
+
+### What is not covered
+
+- `start` and `scripts/deploy.sh` rely on your existing SSH keys.
+- Sessions and the users file are per server; there is no central directory.
+
+## Build and deploy
+
+```
+scripts/build.sh                 # go vet + go test + build into build/ship-grip-fim
+scripts/build.sh --quick         # build only
+scripts/deploy.sh                # every host in hosts.conf with sshUser + binaryPath
+scripts/deploy.sh homeserver     # one host
+scripts/deploy.sh --no-restart   # copy files, leave agents running
+scripts/deploy.sh --local        # install on this machine (/opt/ship-grip-fim or ~/ship-grip-fim)
+scripts/deploy.sh --local=/srv/fim --service   # ...into a chosen dir, as a systemd service
+```
+
+`deploy.sh` copies the binary, installs `integrity.conf` and the ignore files
+only when they are missing on the host (it never overwrites `users.db`,
+`agent.crt` or `agent.key`), restarts the agent from the binary's directory and
+pins the agent's TLS fingerprint in your local `known_agents`.
+
+To run the agent as a service, see the comments in
+`scripts/ship-grip-fim-agent.service`.

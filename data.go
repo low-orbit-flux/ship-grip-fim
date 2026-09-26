@@ -1,47 +1,57 @@
 package main
 
 import (
-	//"log"
 	"fmt"
+	"strings"
 )
 
 type reportHeader struct {
-	name string 
+	name string
 	time string
 	host string
 	path string
 }
 
+var errNoDataSource = fmt.Errorf("no valid data source specified")
 
-func saveToDB(config configInfo, fileMap *SafeFileMap){
-	if config.dataSource == "file" {	
-		saveToDBFile(config, fileMap)
-	}else {
-		fmt.Printf("ERROR - no valid data source specified")
+// reportTimeFormat is the timestamp suffix appended to report file names.
+// Dashes are used in the time part because ":" is not a legal filename
+// character on Windows.  parseReportTimestamp still accepts the older
+// "15:04:05" form so existing reports keep working.
+const reportTimeFormat = "2006-01-02_15-04-05"
+
+// validReportID reports whether id is safe to use as a report file name.
+// Report IDs arrive from the network (agent protocol, web GUI, remote agents
+// during sync) so they must never be able to escape the report directory.
+func validReportID(id string) bool {
+	if id == "" || id == "." || id == ".." {
+		return false
 	}
-
+	if strings.ContainsAny(id, "/\\\x00 \t\r\n") {
+		return false
+	}
+	return true
 }
 
-
-func listReports(config configInfo)(string){
-	output := ""
-	if config.dataSource == "file" {	
-		output += listReportsFile(config)
-	}else {
-		fmt.Printf("ERROR - no valid data source specified")
-		output += "ERROR - no valid data source specified"
-	}
-	return output
-}
-
-
-
-func listReportData(config configInfo, id1 string){
+func saveToDB(config configInfo, fileMap *SafeFileMap) error {
 	if config.dataSource == "file" {
-		listReportDataFile(config, id1)
-	}else {
-		fmt.Printf("ERROR - no valid data source specified")
+		return saveToDBFile(config, fileMap)
 	}
+	return errNoDataSource
+}
+
+func listReports(config configInfo) string {
+	if config.dataSource == "file" {
+		return listReportsFile(config)
+	}
+	return "ERROR - " + errNoDataSource.Error() + "\n"
+}
+
+func listReportData(config configInfo, id1 string) error {
+	if config.dataSource == "file" {
+		return listReportDataFile(config, id1)
+	}
+	return errNoDataSource
 }
 
 // listReportDataString returns the report contents as a string (used by agent).
@@ -49,33 +59,26 @@ func listReportDataString(config configInfo, id1 string) string {
 	if config.dataSource == "file" {
 		return listReportDataStringFile(config, id1)
 	}
-	return "ERROR - no valid data source specified\n"
+	return "ERROR - " + errNoDataSource.Error() + "\n"
 }
 
-
-func reportStat(config configInfo, reportNamePath string)(reportHeader){
-	if config.dataSource == "file" {	
+func reportStat(config configInfo, reportNamePath string) (reportHeader, error) {
+	if config.dataSource == "file" {
 		return reportStatFile(config, reportNamePath)
-	}else {
-		fmt.Printf("ERROR - no valid data source specified")
-		return reportHeader{}  // return empty
 	}
+	return reportHeader{}, errNoDataSource
 }
 
-
-func compareReportsData(config configInfo, oldReportName string, newReportName string, oldReport map[string]string, newReport map[string]string, oldHeader reportHeader, newHeader reportHeader){
-	if( config.dataSource == "file" ) {
-		compareReportsDataFile(config, oldReportName, newReportName, oldReport, newReport, oldHeader, newHeader)
-	} else {
-		fmt.Printf("ERROR - no valid data source specified")
+func compareReportsData(config configInfo, oldReportName string, newReportName string, oldReport map[string]string, newReport map[string]string, oldHeader reportHeader, newHeader reportHeader) error {
+	if config.dataSource == "file" {
+		return compareReportsDataFile(config, oldReportName, newReportName, oldReport, newReport, oldHeader, newHeader)
 	}
+	return errNoDataSource
 }
 
-
-func saveCompare(config configInfo, compareReportName string, oldHeader reportHeader, newHeader reportHeader, cr compareReport){
-	if config.dataSource == "file" {	
-		saveCompareFile(config, compareReportName, oldHeader, newHeader, cr)
-	}else {
-		fmt.Printf("ERROR - no valid data source specified")
+func saveCompare(config configInfo, compareReportName string, oldHeader reportHeader, newHeader reportHeader, cr compareReport) error {
+	if config.dataSource == "file" {
+		return saveCompareFile(config, compareReportName, oldHeader, newHeader, cr)
 	}
+	return errNoDataSource
 }

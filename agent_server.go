@@ -2,12 +2,21 @@ package main
 
 import (
 	"bufio"
+	"crypto/tls"
+	"errors"
 	"fmt"
 	"net"
 	"strings"
 	"sync"
 	"time"
 )
+
+// maxCommandLine bounds the size of one protocol line so a client cannot make
+// the agent buffer an unbounded amount of memory.
+const maxCommandLine = 64 * 1024
+
+// authTimeout is how long an unauthenticated connection may sit idle.
+const authTimeout = 30 * time.Second
 
 // scanStats records stats from the most recent scan (in-memory; persisted on
 // startup via initAgentState by reading the report directory).
@@ -67,13 +76,36 @@ func startAgentServer(config configInfo) {
 // startAgentServerWithStop is like startAgentServer but closes the listener
 // when the stop channel is closed, allowing a clean shutdown (used by GUI).
 func startAgentServerWithStop(config configInfo, stop <-chan struct{}) {
+	cert, certCreated, err := loadOrCreateAgentCert(config.agentCert, config.agentKey)
+	if err != nil {
+		fmt.Println("ERROR - agent TLS certificate:", err)
+		return
+	}
+	if certCreated {
+		fmt.Printf("Generated agent TLS certificate %s (private key %s)\n", config.agentCert, config.agentKey)
+	}
+	fmt.Println("Agent certificate fingerprint:", certFingerprint(cert.Certificate[0]))
+
+	usersCreated, err := ensureDefaultUser(config.usersDB)
+	if err != nil {
+		fmt.Println("ERROR - users file:", err)
+		return
+	}
+	if usersCreated {
+		fmt.Printf("Created %s with the default user %q / %q\n", config.usersDB, defaultAdminUser, defaultAdminPassword)
+	}
+	if usingDefaultPassword(config.usersDB) {
+		fmt.Printf("WARNING - user %q still has the default password; change it with:\n"+
+			"          ship-grip-fim user passwd %s <new-password>\n", defaultAdminUser, defaultAdminUser)
+	}
+
 	initAgentState(config)
 	initScheduler(config)
 	defer stopScheduler()
 
 	addr := config.agentHost + ":" + config.agentPort
-	fmt.Println("Agent listening on " + addr)
-	l, err := net.Listen("tcp", addr)
+	fmt.Println("Agent listening on " + addr + " (TLS 1.3, authentication required)")
+	l, err := tls.Listen("tcp", addr, agentTLSConfig(cert))
 	if err != nil {
 		fmt.Println("ERROR - could not start agent:", err)
 		return
@@ -87,15 +119,11 @@ func startAgentServerWithStop(config configInfo, stop <-chan struct{}) {
 	for {
 		c, err := l.Accept()
 		if err != nil {
-			if stop != nil {
-				select {
-				case <-stop:
-					return
-				default:
-				}
+			if errors.Is(err, net.ErrClosed) {
+				return // listener closed via stop channel
 			}
 			fmt.Println("ERROR accepting connection:", err)
-			return
+			continue // transient error; keep serving
 		}
 		fmt.Println("Client connected:", c.RemoteAddr().String())
 		go handleConnection(config, &clientConn{conn: c})
@@ -104,14 +132,42 @@ func startAgentServerWithStop(config configInfo, stop <-chan struct{}) {
 
 func handleConnection(config configInfo, cc *clientConn) {
 	defer cc.conn.Close()
-	reader := bufio.NewReader(cc.conn)
+	remote := cc.conn.RemoteAddr().String()
+	scanner := bufio.NewScanner(cc.conn)
+	scanner.Buffer(make([]byte, 0, 4096), maxCommandLine)
+
+	// The first line must be "auth <user> <password>".  Nothing else is
+	// accepted before authentication, and the client gets authTimeout to send it.
+	cc.conn.SetReadDeadline(time.Now().Add(authTimeout))
+	if !scanner.Scan() {
+		fmt.Println("Client disconnected before authenticating:", remote)
+		return
+	}
+	authParts := strings.SplitN(strings.TrimSpace(scanner.Text()), " ", 3)
+	if len(authParts) != 3 || authParts[0] != "auth" {
+		cc.write("ERROR - authentication required: first line must be 'auth <user> <password>'\n")
+		return
+	}
+	user := authParts[1]
+	role, ok := authenticate(config.usersDB, user, authParts[2])
+	if !ok {
+		fmt.Println("Authentication FAILED for user", user, "from", remote)
+		cc.write("ERROR - authentication failed\n")
+		return
+	}
+	cc.conn.SetReadDeadline(time.Time{})
+	fmt.Println("Authenticated user", user, "("+role+") from", remote)
+	cc.write("OK - authenticated as " + user + " (" + role + ")\n")
 
 	for {
-		line, err := reader.ReadString('\n')
-		if err != nil {
+		if !scanner.Scan() {
+			if err := scanner.Err(); err != nil && !errors.Is(err, net.ErrClosed) {
+				fmt.Println("Client", cc.conn.RemoteAddr().String(), "read error:", err)
+			}
 			fmt.Println("Client disconnected:", cc.conn.RemoteAddr().String())
 			return
 		}
+		line := scanner.Text()
 
 		parts := strings.Fields(strings.TrimSpace(line))
 		if len(parts) == 0 {
@@ -119,7 +175,17 @@ func handleConnection(config configInfo, cc *clientConn) {
 		}
 
 		cmd := parts[0]
-		fmt.Println("Command from", cc.conn.RemoteAddr().String()+":", strings.TrimSpace(line))
+		logLine := strings.TrimSpace(line)
+		if cmd == "user" && len(parts) > 3 {
+			logLine = strings.Join(parts[:3], " ") + " ****" // never log passwords
+		}
+		fmt.Println("Command from", user+"@"+remote+":", logLine)
+
+		if need := commandRole(parts); !roleAllows(role, need) {
+			cc.write("ERROR - permission denied: '" + cmd + "' requires the " + need + " role (you are " + role + ")\n")
+			cc.done()
+			continue
+		}
 
 		switch cmd {
 
@@ -136,14 +202,26 @@ func handleConnection(config configInfo, cc *clientConn) {
 
 			cc.write("Scan started in background\n")
 			go func() {
-				callScan(config)
-				state.mu.Lock()
-				state.scanRunning = false
-				state.mu.Unlock()
+				defer func() {
+					// A panic here must not take the whole agent down or leave
+					// scanRunning stuck at true.
+					if r := recover(); r != nil {
+						fmt.Println("ERROR - background scan panicked:", r)
+						cc.write(fmt.Sprintf("ERROR - scan failed: %v\n", r))
+					}
+					state.mu.Lock()
+					state.scanRunning = false
+					state.mu.Unlock()
+					cc.done()
+				}()
+				if err := callScan(config); err != nil {
+					fmt.Println("ERROR - background scan:", err)
+					cc.write("ERROR - scan failed: " + err.Error() + "\n")
+					return
+				}
 				fmt.Println("Background scan complete")
 				// best-effort: notify the client that started the scan
 				cc.write("Scan Complete\n")
-				cc.done()
 			}()
 			// do NOT send ---DONE--- here; the goroutine above sends it when finished
 
@@ -192,14 +270,20 @@ func handleConnection(config configInfo, cc *clientConn) {
 			id1, id2 := parts[1], parts[2]
 			cc.write("Compare started in background\n")
 			go func() {
+				defer func() {
+					if r := recover(); r != nil {
+						fmt.Println("ERROR - background compare panicked:", r)
+						cc.write(fmt.Sprintf("ERROR - compare failed: %v\n", r))
+					}
+					state.mu.Lock()
+					state.compareRunning = false
+					state.mu.Unlock()
+					cc.done()
+				}()
 				output := compareReportsString(config, id1, id2)
-				state.mu.Lock()
-				state.compareRunning = false
-				state.mu.Unlock()
 				fmt.Println("Background compare complete")
 				cc.write(output)
 				cc.write("Compare Complete\n")
-				cc.done()
 			}()
 
 		case "quickcompare":
@@ -230,6 +314,15 @@ func handleConnection(config configInfo, cc *clientConn) {
 		case "schedule":
 			handleScheduleCmd(cc, parts)
 
+		case "user":
+			// Manage the users file on this agent (admin), or change own password.
+			cc.write(userCommandAs(config.usersDB, parts[1:], user, role))
+			cc.done()
+
+		case "whoami":
+			cc.write(user + " " + role + "\n")
+			cc.done()
+
 		case "jobs":
 			// Combined overview: running state + scheduled jobs + recent history.
 			if sched == nil {
@@ -242,8 +335,9 @@ func handleConnection(config configInfo, cc *clientConn) {
 		default:
 			cc.write("ERROR - unknown command: " + cmd + "\n")
 			cc.write("Available commands: scan, list, data <ID>, fetch <ID>, compare <ID> <ID>,\n")
-			cc.write("                   status, jobs,\n")
-			cc.write("                   schedule list|history|add <name>|<cron>|<cmd>|remove <name>\n")
+			cc.write("                   status, jobs, metrics, quickcompare,\n")
+			cc.write("                   schedule list|history|add <name>|<cron>|<cmd>|remove <name>,\n")
+			cc.write("                   whoami, user list|add <name> <pw> [role]|passwd <name> <pw>|role <name> <role>|remove <name>\n")
 			cc.done()
 		}
 	}

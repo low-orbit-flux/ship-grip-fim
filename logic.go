@@ -4,144 +4,157 @@ import (
 	"crypto/md5"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
 	"os"
+	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 )
 
-
-
 // thread safe type used to hold hash of files after scan
 type SafeFileMap struct {
 	v   map[string]string
 	mux sync.Mutex
-  }
-  
-func sumFile(file string) string {
-	  f, err := os.Open(file)
-	  if err != nil {
-		  log.Print(err)
-	  }
-	  defer f.Close()
-  
-	  h := md5.New()
-	  if _, err := io.Copy(h, f); err != nil {
-		  log.Print(err)
-	  }
-  
-	  //fmt.Printf("%x", h.Sum(nil))
-	  return fmt.Sprintf("%x", h.Sum(nil))
-  }
-  
-  func walkFiles(config configInfo, dir string, allFilesList *[]string) {
-
-      for _, p := range config.ignorePathNoWalk {             // don't walk if on the exclude list
-            if p.MatchString(dir) {fmt.Println("DEBUG: excluding " + dir); return }
-	  }
-
-	  files, err := ioutil.ReadDir(dir)
-	  if err != nil {
-		  log.Print(err)
-	  }
-  
-	  for _, file := range files {
-		  switch {
-		  case file.IsDir():
-			  name := file.Name()
-			  //fmt.Printf("dir %s\n", name)
-			  walkFiles(config, dir+"/"+name, allFilesList) // dir - recursive call
-		  case file.Mode().IsRegular():
-			  name := file.Name()
-			  //sumFile(dir + "/" + name)
-			  *allFilesList = append(*allFilesList, dir+"/"+name)
-			  //fmt.Printf("file %v/%v\n", dir, name)
-		  }
-	  }
-  }
-  
-  func checkFiles(allFilesList *[]string, fileMap *SafeFileMap, wg *sync.WaitGroup ) {
-  
-	  defer wg.Done()
-	  for _, file := range *allFilesList {
-		  r := sumFile(file)  
-	      fileMap.mux.Lock()
-		  fileMap.v[file] = r
-		  fileMap.mux.Unlock()
-	  }  
-  }
-
-  
-func parallelFileCheck(config configInfo, fileMap *SafeFileMap) {
-
-	var wg sync.WaitGroup
-  
-	allFilesList := make([]string, 0, 10)
-  
-	walkFiles(config, config.path, &allFilesList)
-  
-	splitIncrement := len(allFilesList) / config.paraCount
-	splitS := 0
-	splitE := splitIncrement
-	wg.Add(config.paraCount)
-
-	for i := 0; i < config.paraCount; i++ {
-	    aPart := allFilesList[splitS:splitE]
-	    go checkFiles(&aPart, fileMap, &wg)   // process a slice
-	    splitS = splitE
-	    splitE += splitIncrement
-	    // avoid off by one at the end of the array
-	    if splitE >= len(allFilesList) {
-	    	splitE = len(allFilesList) - 1
-	    }
-	  
-    	//	 On the last iteration, make sure we don't leave out some elements
-	    //	 due to rounding down of split increment.  A couple files kept
-	    //	 getting left off the end of the list.
-        //
-	    //	 This also fixes going past the end of the array so we don't need the
-	    //	 check above this but we're keeping it anyway in case we get rid of this
-	    //	 part.
-	  
-	    if i == config.paraCount-2 {
-	    	splitE = len(allFilesList)
-	    }
-	}
-	wg.Wait()
-  
-	for _, file := range allFilesList {
-	    fileMap.mux.Lock()
-		fmt.Printf("%v %v\n", fileMap.v[file], file)
-	    fileMap.mux.Unlock()
-	}
-	fmt.Printf("\nNumber of files found: %v", len(allFilesList))
-	fmt.Printf("\nNumber of files checked: %v\n", len(fileMap.v))
 }
-    
 
-type change struct{
-    path string
-    oldHash string
+// emptyFileMD5 is the hash of zero bytes.  Empty files have no content
+// identity, so they are never paired up as "moved".
+const emptyFileMD5 = "d41d8cd98f00b204e9800998ecf8427e"
+
+// sumFile returns the hex MD5 of a file's contents.  An error is returned
+// (rather than the hash of an empty stream) when the file cannot be read, so
+// that unreadable files are never mistaken for empty ones.
+func sumFile(file string) (string, error) {
+	f, err := os.Open(file)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	h := md5.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", fmt.Errorf("%s: %w", file, err)
+	}
+	return fmt.Sprintf("%x", h.Sum(nil)), nil
+}
+
+// matchesAny reports whether s matches at least one of the patterns.
+func matchesAny(patterns []*regexp.Regexp, s string) bool {
+	for _, p := range patterns {
+		if p != nil && p.MatchString(s) {
+			return true
+		}
+	}
+	return false
+}
+
+// walkFiles recursively collects regular files under dir.  Directories that
+// match ignorePathNoWalk are skipped entirely.  Symlinks are never followed.
+func walkFiles(config configInfo, dir string, allFilesList *[]string) {
+	if matchesAny(config.ignorePathNoWalk, dir) {
+		fmt.Println("DEBUG: excluding " + dir)
+		return
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		log.Print(err)
+		// ReadDir may return partial results alongside the error; keep going.
+	}
+
+	for _, e := range entries {
+		name := e.Name()
+		switch {
+		case e.IsDir():
+			walkFiles(config, dir+"/"+name, allFilesList) // recursive call
+		case e.Type().IsRegular():
+			*allFilesList = append(*allFilesList, dir+"/"+name)
+		}
+	}
+}
+
+// parallelFileCheck walks config.path and checksums every file using a pool
+// of config.paraCount workers fed from a channel.  A channel-based pool
+// balances load between workers (one huge file no longer stalls a whole
+// chunk) and behaves correctly for empty directories and for any worker
+// count, which the previous slice-splitting approach did not.
+func parallelFileCheck(config configInfo, fileMap *SafeFileMap) {
+	allFilesList := make([]string, 0, 1024)
+	walkFiles(config, config.path, &allFilesList)
+
+	workers := config.paraCount
+	if workers < 1 {
+		workers = 1
+	}
+
+	var (
+		wg         sync.WaitGroup
+		jobs       = make(chan string)
+		errMu      sync.Mutex
+		unreadable int
+	)
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for file := range jobs {
+				sum, err := sumFile(file)
+				if err != nil {
+					log.Print("WARN - skipping unreadable file: ", err)
+					errMu.Lock()
+					unreadable++
+					errMu.Unlock()
+					continue
+				}
+				fileMap.mux.Lock()
+				fileMap.v[file] = sum
+				fileMap.mux.Unlock()
+			}
+		}()
+	}
+	for _, file := range allFilesList {
+		jobs <- file
+	}
+	close(jobs)
+	wg.Wait()
+
+	fileMap.mux.Lock()
+	for _, file := range allFilesList {
+		if sum, ok := fileMap.v[file]; ok {
+			fmt.Printf("%v %v\n", sum, file)
+		}
+	}
+	checked := len(fileMap.v)
+	fileMap.mux.Unlock()
+
+	fmt.Printf("\nNumber of files found: %v", len(allFilesList))
+	fmt.Printf("\nNumber of files checked: %v", checked)
+	fmt.Printf("\nNumber of files unreadable (skipped): %v\n", unreadable)
+}
+
+type change struct {
+	path    string
+	oldHash string
 	newHash string
 }
-type move struct{
+type move struct {
 	oldPath string
 	newPath string
-    hash string
+	hash    string
 }
 
 type compareReport struct {
-	newFiles map[string]string
+	newFiles     map[string]string
 	missingFiles map[string]string
 	changedFiles []change
-	movedFiles []move
+	movedFiles   []move
 }
 
 // buildCompareReport loads two reports and returns the diff result plus headers.
 // It is shared by compareReports (CLI) and compareReportsString (agent).
-func buildCompareReport(config configInfo, oldReportName string, newReportName string) (compareReport, reportHeader, reportHeader) {
+func buildCompareReport(config configInfo, oldReportName string, newReportName string) (compareReport, reportHeader, reportHeader, error) {
 	oldReport := make(map[string]string)
 	newReport := make(map[string]string)
 
@@ -152,53 +165,71 @@ func buildCompareReport(config configInfo, oldReportName string, newReportName s
 		movedFiles:   []move{},
 	}
 
-	oh := reportStatFile(config, oldReportName)
-	nh := reportStatFile(config, newReportName)
+	oh, err := reportStat(config, oldReportName)
+	if err != nil {
+		return cr, oh, reportHeader{}, err
+	}
+	nh, err := reportStat(config, newReportName)
+	if err != nil {
+		return cr, oh, nh, err
+	}
 
-	compareReportsData(config, oldReportName, newReportName, oldReport, newReport, oh, nh)
+	if err := compareReportsData(config, oldReportName, newReportName, oldReport, newReport, oh, nh); err != nil {
+		return cr, oh, nh, err
+	}
 
 	fmt.Printf("\nBoth caches loaded...\n\n")
 
+	ignored := func(path string) bool { return matchesAny(config.ignorePath, path) }
+
 	for k, v := range oldReport {
 		if v2, ok := newReport[k]; ok {
-			if v2 != v {
-				for _, p := range config.ignorePath {
-					if !p.MatchString(k) {
-						cr.changedFiles = append(cr.changedFiles, change{path: k, oldHash: v, newHash: v2})
-					}
-				}
+			if v2 != v && !ignored(k) {
+				cr.changedFiles = append(cr.changedFiles, change{path: k, oldHash: v, newHash: v2})
 			}
 			delete(newReport, k)
-		} else {
-			for _, p := range config.ignorePath {
-				if !p.MatchString(k) {
-					cr.missingFiles[k] = v
-				}
-			}
+		} else if !ignored(k) {
+			cr.missingFiles[k] = v
 		}
 	}
 	for k, v := range newReport {
-		for _, p := range config.ignorePath {
-			if !p.MatchString(k) {
-				cr.newFiles[k] = v
-			}
+		if !ignored(k) {
+			cr.newFiles[k] = v
 		}
 	}
 
-	for k, v := range cr.missingFiles {
-		for k2, v2 := range cr.newFiles {
-			if v == v2 {
-				cr.movedFiles = append(cr.movedFiles, move{oldPath: k, newPath: k2, hash: v})
-			}
-		}
+	// A file that is missing at one path and new at another with the same
+	// hash is reported as a move rather than as missing + new.  Matching is
+	// one-to-one: each new path is consumed by at most one missing path, so
+	// N identical files (e.g. empty files) that move produce N MOVED lines
+	// instead of an N×N cross product.  Paths are sorted so the pairing is
+	// deterministic.
+	newByHash := make(map[string][]string, len(cr.newFiles))
+	for k, v := range cr.newFiles {
+		newByHash[v] = append(newByHash[v], k)
 	}
-	for _, v := range cr.movedFiles {
-		if _, ok := cr.missingFiles[v.oldPath]; ok {
-			delete(cr.missingFiles, v.oldPath)
+	for _, paths := range newByHash {
+		sort.Strings(paths)
+	}
+	missingPaths := make([]string, 0, len(cr.missingFiles))
+	for k := range cr.missingFiles {
+		missingPaths = append(missingPaths, k)
+	}
+	sort.Strings(missingPaths)
+	for _, k := range missingPaths {
+		v := cr.missingFiles[k]
+		if v == emptyFileMD5 {
+			continue // reported as MISSING + NEW instead
 		}
-		if _, ok := cr.newFiles[v.newPath]; ok {
-			delete(cr.newFiles, v.newPath)
+		candidates := newByHash[v]
+		if len(candidates) == 0 {
+			continue
 		}
+		k2 := candidates[0]
+		newByHash[v] = candidates[1:]
+		cr.movedFiles = append(cr.movedFiles, move{oldPath: k, newPath: k2, hash: v})
+		delete(cr.missingFiles, k)
+		delete(cr.newFiles, k2)
 	}
 
 	// Record stats for the metrics endpoint.
@@ -214,23 +245,34 @@ func buildCompareReport(config configInfo, oldReportName string, newReportName s
 	}
 	state.mu.Unlock()
 
-	return cr, oh, nh
+	return cr, oh, nh, nil
 }
 
 // compareReports runs the comparison for the local CLI (prints to stdout, saves to file).
-func compareReports(config configInfo, oldReportName string, newReportName string) {
-	cr, oh, nh := buildCompareReport(config, oldReportName, newReportName)
+func compareReports(config configInfo, oldReportName string, newReportName string) error {
+	cr, oh, nh, err := buildCompareReport(config, oldReportName, newReportName)
+	if err != nil {
+		return err
+	}
 	compareReportName := "compare__" + oldReportName + "__" + newReportName
-	saveCompare(config, compareReportName, oh, nh, cr)
+	if err := saveCompare(config, compareReportName, oh, nh, cr); err != nil {
+		return err
+	}
 	fmt.Printf("\n[Completed]\n\n")
+	return nil
 }
 
 // compareReportsString runs the comparison for the agent, returning the diff
 // output as a string while still saving the compare report file.
 func compareReportsString(config configInfo, oldReportName string, newReportName string) string {
-	cr, oh, nh := buildCompareReport(config, oldReportName, newReportName)
+	cr, oh, nh, err := buildCompareReport(config, oldReportName, newReportName)
+	if err != nil {
+		return "ERROR - " + err.Error() + "\n"
+	}
 	compareReportName := "compare__" + oldReportName + "__" + newReportName
-	saveCompare(config, compareReportName, oh, nh, cr)
+	if err := saveCompare(config, compareReportName, oh, nh, cr); err != nil {
+		return "ERROR - " + err.Error() + "\n"
+	}
 
 	var sb strings.Builder
 	sb.WriteString("Old: " + oh.name + "," + oh.time + "," + oh.host + "," + oh.path + "\n")
@@ -249,5 +291,3 @@ func compareReportsString(config configInfo, oldReportName string, newReportName
 	}
 	return sb.String()
 }
-
-  

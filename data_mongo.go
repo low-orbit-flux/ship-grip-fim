@@ -1,7 +1,6 @@
 package main
 
-
-// Old and probably not needed for anything anymore 
+// Old and probably not needed for anything anymore
 /*
   type Report struct {
 		Id bson.ObjectId `json:"id" bson:"_id,omitempty"`
@@ -18,7 +17,6 @@ package main
 		  Hash    string `json:"hash" bson:"hash"`
   }
 */
-
 
 /*
 
@@ -44,17 +42,17 @@ d.fileHashCollection = r[0][2]
 
 
 func compareReportsDataMongo(reportID1 string, reportID2 string)([]FileHash,[]FileHash){
-  
+
 	d := DBConnect{databaseHost: "localhost",	database: "integrity",	reportCollection: "report",	fileHashCollection: "fileHash"}
 
-	// DB connection 1 
+	// DB connection 1
 	session, err := mgo.Dial(d.databaseHost)
 	if err != nil {
 	    log.Print(err)
 	}
 	defer session.Close()
 	c := session.DB(d.database).C(d.fileHashCollection)
-  
+
 	//	- get first report from DB
 	//	- query based on: report ID 1
 	//	- save in: fileHashes
@@ -64,15 +62,15 @@ func compareReportsDataMongo(reportID1 string, reportID2 string)([]FileHash,[]Fi
 	if err != nil {
 	    log.Print(err)
 	}
-  
-	// DB connection 2	
+
+	// DB connection 2
 	session2, err2 := mgo.Dial(d.databaseHost)
 	if err2 != nil {
 	    log.Print(err2)
 	}
 	defer session2.Close()
 	c2 := session2.DB(d.database).C(d.fileHashCollection)
-  
+
 	//	- get second report from DB
 	//	- query based on: report ID 2
 	//	- save in: fileHashes2

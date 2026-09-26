@@ -1,4 +1,16 @@
+# builds
 *.exe
-arch.jpeg
 ship-grip-fim
-integrity_reports
+build/
+
+# data
+integrity_reports/
+*.log
+
+# agent runtime state and secrets (generated on first agent start)
+agent.crt
+agent.key
+*.crt
+*.key
+users.db
+known_agents

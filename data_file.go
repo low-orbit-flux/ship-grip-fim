@@ -1,262 +1,228 @@
 package main
 
 import (
-	"time"
-	"os"
-	"fmt"
-	"io/ioutil"
 	"bufio"
+	"fmt"
+	"os"
 	"strings"
+	"time"
 )
 
-func saveToDBFile(config configInfo, fileMap *SafeFileMap){
-	fileMap.mux.Lock()
+// ensureReportDir creates the report directory if it does not exist.
+func ensureReportDir(config configInfo) error {
+	if err := os.MkdirAll(config.reportDir, 0755); err != nil {
+		return fmt.Errorf("can't create report dir %q: %w", config.reportDir, err)
+	}
+	return nil
+}
 
-	_, e1 := os.Stat(config.reportDir)
-    if os.IsNotExist(e1) {
-    	err := os.Mkdir(config.reportDir, 0755)
-        if err != nil {
-            fmt.Print("\n\n\n\nERROR - Can't create report dir.\n\n\n\n")
-            panic(err)
-        }
+// writeLines creates path (truncating any existing file) and writes every
+// line produced by fn through a buffered writer.
+func writeLines(path string, fn func(w *bufio.Writer) error) error {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+	if err != nil {
+		return err
+	}
+	w := bufio.NewWriter(f)
+	if err := fn(w); err != nil {
+		f.Close()
+		return err
+	}
+	if err := w.Flush(); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
+}
+
+func saveToDBFile(config configInfo, fileMap *SafeFileMap) error {
+	if err := ensureReportDir(config); err != nil {
+		return err
 	}
 
-    t := time.Now()
-    timeString := t.Format("2006-01-02_15:04:05") // just format, not hardcoded
+	timeString := time.Now().Format(reportTimeFormat)
 	fmt.Print(timeString)
-    
-	f, err := os.OpenFile(config.reportDir + "/" + config.reportName + "_" + timeString, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0600)
+
+	fileMap.mux.Lock()
+	defer fileMap.mux.Unlock()
+
+	path := config.reportDir + "/" + config.reportName + "_" + timeString
+	return writeLines(path, func(w *bufio.Writer) error {
+		if _, err := w.WriteString(config.reportName + "," + timeString + "," + config.host + "," + config.path + "\n"); err != nil {
+			return err
+		}
+		for k, v := range fileMap.v {
+			if _, err := w.WriteString(v + "," + k + "\n"); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func listReportsFile(config configInfo) string {
+	entries, err := os.ReadDir(config.reportDir)
 	if err != nil {
-		panic(err)
+		return "ERROR - can't read report dir: " + err.Error() + "\n"
+	}
+	var sb strings.Builder
+	for _, e := range entries {
+		if e.IsDir() { // e.g. the remote/ sync directory
+			continue
+		}
+		sb.WriteString(e.Name() + "\n")
+	}
+	return sb.String()
+}
+
+func listReportDataFile(config configInfo, id1 string) error {
+	if !validReportID(id1) {
+		return fmt.Errorf("invalid report ID %q", id1)
+	}
+	f, err := os.Open(config.reportDir + "/" + id1)
+	if err != nil {
+		return err
 	}
 	defer f.Close()
-	if _, err = f.WriteString(config.reportName + "," + timeString + "," + config.host + "," + config.path + "\n"); err != nil {
-		panic(err)
+	s := bufio.NewScanner(f)
+	for s.Scan() {
+		fmt.Println(s.Text())
 	}
-	f2, err := os.OpenFile(config.reportDir + "/" + config.reportName + "_" + timeString, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
-	if err != nil {
-		panic(err)
-	}
-	defer f2.Close()
-	for k, v := range fileMap.v {
-		if _, err = f2.WriteString(v + "," + k + "\n"); err != nil {
-			panic(err)
-		}
-	}
-
-	fileMap.mux.Unlock()
-}
-
-
-func listReportsFile(config configInfo)(string){
-	output := ""
-    f, err := ioutil.ReadDir(config.reportDir)
-    if err != nil {
-        fmt.Println("\n\n\n============================================\n")
-        fmt.Println("Empty, no reports or other error, see below.\n")
-        fmt.Println("============================================\n\n\n")
-        fmt.Println(err)
-        fmt.Println("\n--------------------------------------------\n\n\n")
-    }
-    for _, i := range f {
-        fmt.Println(i.Name())
-		output += i.Name() + "\n"
-    } 
-	return output
-}
-
-
-
-func listReportDataFile(config configInfo, id1 string){
-    f, err := os.Open(config.reportDir + "/" + id1)
-    if err != nil {
-        panic(err)
-    }
-    defer f.Close()
-    s := bufio.NewScanner(f)
-    for s.Scan() {
-        fmt.Println(s.Text())
-    }
-    if err := s.Err(); err != nil {
-        panic(err)
-    }
+	return s.Err()
 }
 
 // listReportDataStringFile returns the report file contents as a string.
 func listReportDataStringFile(config configInfo, id1 string) string {
-    f, err := os.Open(config.reportDir + "/" + id1)
-    if err != nil {
-        return "ERROR - " + err.Error() + "\n"
-    }
-    defer f.Close()
-    var sb strings.Builder
-    s := bufio.NewScanner(f)
-    for s.Scan() {
-        sb.WriteString(s.Text() + "\n")
-    }
-    if err := s.Err(); err != nil {
-        return "ERROR - " + err.Error() + "\n"
-    }
-    return sb.String()
-}
-
-func reportStatFile(config configInfo, reportNamePath string)(reportHeader){
-    // could have just returned this info from compareReportsDataFile() but 
-    // nice to have a dedicated function for other purposes
-
-    f, err := os.Open(config.reportDir + "/" + reportNamePath)
-    if err != nil {
-        panic(err)
-    }
-    defer f.Close()
-    s := bufio.NewScanner(f)
-    s.Scan() 
-    h := strings.SplitN(s.Text(),",",4)  // watch for commas in file names
-    rh := reportHeader{}
-    if len(h) >= 4 {
-        rh = reportHeader{ name:h[0], time:h[1], host:h[2], path:h[3]}
-    }else {
-        fmt.Println("Error - header not parsed")
-    }
-    if err := s.Err(); err != nil {
-        panic(err)
-    }
-    return rh
-}
-
-func compareReportsDataFile(config configInfo, oldReportName string, newReportName string, oldReport map[string]string, newReport map[string]string, oldHeader reportHeader, newHeader reportHeader){
-  
-
-	fmt.Printf("\nLoading first cache...\n\n")
-
-    f, err := os.Open(config.reportDir + "/" + oldReportName)
-    if err != nil {
-        panic(err)
-    }
-    defer f.Close()
-    s := bufio.NewScanner(f)
-    s.Scan() // remove header, that we already have .....
-    for s.Scan() {
-        lines1 := strings.SplitAfterN(s.Text(),",",2)
-		if len(lines1) == 2 {
-            //fmt.Println(lines1[0] + lines1[1])
-			oldReport[lines1[1]] = lines1[0] 
-		} else {
-            fmt.Println("ERROR - line split in to more or less than 2 cols")
-        }
-    }
-    if err := s.Err(); err != nil {
-        panic(err)
-    }
-
-
-
-	fmt.Printf("\nLoading second cache...\n\n")
-
-
-    f2, err := os.Open(config.reportDir + "/" + newReportName)
-    if err != nil {
-        panic(err)
-    }
-    defer f2.Close()
-    s2 := bufio.NewScanner(f2)
-    s2.Scan() // remove header, that we already have .....
-    for s2.Scan() {
-        lines1 := strings.SplitAfterN(s2.Text(),",",2)
-		if len(lines1) == 2 {
-            //fmt.Println(lines1[0] + lines1[1])
-			newReport[lines1[1]] = lines1[0]
-		} else {
-            fmt.Println("ERROR - line split in to more or less than 2 cols")
-        }
-    }
-    if err := s2.Err(); err != nil {
-        panic(err)
-    }
-
-    if config.removeBasePath {
-        keys1 := make([]string, 0, len(oldReport))
-        for k := range oldReport {
-            keys1 = append(keys1, k)
-        }
-        keys2 := make([]string, 0, len(newReport))
-        for k := range newReport {
-            keys2 = append(keys2, k)
-        }
-        for _, k := range keys1 {
-            v := oldReport[k]
-            k2 := strings.ReplaceAll(k, oldHeader.path, "")
-            delete(oldReport, k) // do this first (edge case), incase a base path didn't exist and couldn't be removed the keys could be the same ( should never happen though )
-            oldReport[k2] = v
-        }
-        for _, k := range keys2 {
-            v := newReport[k]
-            k2 := strings.ReplaceAll(k, newHeader.path, "")
-            delete(newReport, k) // do this first (edge case), incase a base path didn't exist and couldn't be removed the keys could be the same ( should never happen though )
-            newReport[k2] = v
-        }
-    }
-}
-
-
-
-
-
-
-func saveCompareFile(config configInfo, compareReportName string, oldHeader reportHeader, newHeader reportHeader, cr compareReport){
-	_, e1 := os.Stat(config.reportDir)
-    if os.IsNotExist(e1) {
-    	err := os.Mkdir(config.reportDir, 0755)
-        if err != nil {
-            fmt.Print("\n\n\n\nERROR - Can't create report dir.\n\n\n\n")
-            panic(err)
-        }
+	if !validReportID(id1) {
+		return "ERROR - invalid report ID\n"
 	}
-
-    t := time.Now()
-    timeString := t.Format("2006-01-02_15:04:05") // just format, not hardcoded
-
-	f, err := os.OpenFile(config.reportDir + "/" + compareReportName + "__" + timeString, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0600)
+	data, err := os.ReadFile(config.reportDir + "/" + id1)
 	if err != nil {
-		panic(err)
+		return "ERROR - " + err.Error() + "\n"
+	}
+	out := string(data)
+	if out != "" && !strings.HasSuffix(out, "\n") {
+		out += "\n"
+	}
+	return out
+}
+
+func reportStatFile(config configInfo, reportNamePath string) (reportHeader, error) {
+	// could have just returned this info from compareReportsDataFile() but
+	// nice to have a dedicated function for other purposes
+	if !validReportID(reportNamePath) {
+		return reportHeader{}, fmt.Errorf("invalid report ID %q", reportNamePath)
+	}
+	f, err := os.Open(config.reportDir + "/" + reportNamePath)
+	if err != nil {
+		return reportHeader{}, err
 	}
 	defer f.Close()
-	if _, err = f.WriteString("Old Header: " + oldHeader.name + "," + oldHeader.time + "," + oldHeader.host + "," + oldHeader.path + "\n"); err != nil {
-		panic(err)
+	s := bufio.NewScanner(f)
+	s.Scan()
+	if err := s.Err(); err != nil {
+		return reportHeader{}, err
 	}
-    if _, err = f.WriteString("New Header: " + newHeader.name + "," + newHeader.time + "," + newHeader.host + "," + newHeader.path + "\n"); err != nil {
-		panic(err)
+	h := strings.SplitN(s.Text(), ",", 4) // watch for commas in file names
+	if len(h) < 4 {
+		return reportHeader{}, fmt.Errorf("%s: header not parsed", reportNamePath)
 	}
-    
-	f2, err := os.OpenFile(config.reportDir + "/" + compareReportName + "__" + timeString, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
+	return reportHeader{name: h[0], time: h[1], host: h[2], path: h[3]}, nil
+}
+
+// loadReportFile reads "hash,path" lines from a scan report into dst.
+func loadReportFile(path string, dst map[string]string) error {
+	f, err := os.Open(path)
 	if err != nil {
-		panic(err)
+		return err
 	}
-	defer f2.Close()
-
-
-
-    for k, v := range cr.newFiles {
-        fmt.Println("NEW - " + k + " - " + v)
-        if _, err = f2.WriteString("NEW - " + k + " - " + v + "\n"); err != nil {panic(err)}
-    }
-    for k, v := range cr.missingFiles {
-        fmt.Println("MISSING - " + k + " - " + v)
-        if _, err = f2.WriteString("MISSING - " + k + " - " + v + "\n"); err != nil {
-			panic(err)
+	defer f.Close()
+	s := bufio.NewScanner(f)
+	s.Buffer(make([]byte, 0, 64*1024), 1024*1024) // allow long paths
+	s.Scan()                                      // skip header, caller already has it
+	for s.Scan() {
+		cols := strings.SplitN(s.Text(), ",", 2) // hash,path (path may contain commas)
+		if len(cols) == 2 {
+			dst[cols[1]] = cols[0]
+		} else {
+			fmt.Println("ERROR - line split in to more or less than 2 cols")
 		}
-    }
-    for _, v := range cr.changedFiles {
-        fmt.Println("CHANGED - " + v.path + " - " + v.oldHash + " ==> " + v.newHash )
-        if _, err = f2.WriteString("CHANGED - " + v.path + " - " + v.oldHash + " ==> " + v.newHash + "\n"); err != nil {
-			panic(err)
-		}
-    }
-    for _, v := range cr.movedFiles {
-        fmt.Println("MOVED - " + v.oldPath + " ==> " + v.newPath + " - " + v.hash )
-        if _, err = f2.WriteString("MOVED - " + v.oldPath + " ==> " + v.newPath + " - " + v.hash + "\n"); err != nil {
-			panic(err)
-		}
-    }
+	}
+	return s.Err()
+}
 
+// stripBasePath rewrites every key of m with the header path removed.
+func stripBasePath(m map[string]string, base string) {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	for _, k := range keys {
+		v := m[k]
+		k2 := strings.ReplaceAll(k, base, "")
+		delete(m, k) // do this first (edge case), in case the base path wasn't present and the key is unchanged
+		m[k2] = v
+	}
+}
+
+func compareReportsDataFile(config configInfo, oldReportName string, newReportName string, oldReport map[string]string, newReport map[string]string, oldHeader reportHeader, newHeader reportHeader) error {
+	fmt.Printf("\nLoading first cache...\n\n")
+	if err := loadReportFile(config.reportDir+"/"+oldReportName, oldReport); err != nil {
+		return err
+	}
+
+	fmt.Printf("\nLoading second cache...\n\n")
+	if err := loadReportFile(config.reportDir+"/"+newReportName, newReport); err != nil {
+		return err
+	}
+
+	if config.removeBasePath {
+		stripBasePath(oldReport, oldHeader.path)
+		stripBasePath(newReport, newHeader.path)
+	}
+	return nil
+}
+
+func saveCompareFile(config configInfo, compareReportName string, oldHeader reportHeader, newHeader reportHeader, cr compareReport) error {
+	if err := ensureReportDir(config); err != nil {
+		return err
+	}
+
+	timeString := time.Now().Format(reportTimeFormat)
+	path := config.reportDir + "/" + compareReportName + "__" + timeString
+
+	return writeLines(path, func(w *bufio.Writer) error {
+		line := func(s string) error {
+			fmt.Println(s)
+			_, err := w.WriteString(s + "\n")
+			return err
+		}
+		if _, err := w.WriteString("Old Header: " + oldHeader.name + "," + oldHeader.time + "," + oldHeader.host + "," + oldHeader.path + "\n"); err != nil {
+			return err
+		}
+		if _, err := w.WriteString("New Header: " + newHeader.name + "," + newHeader.time + "," + newHeader.host + "," + newHeader.path + "\n"); err != nil {
+			return err
+		}
+		for k, v := range cr.newFiles {
+			if err := line("NEW - " + k + " - " + v); err != nil {
+				return err
+			}
+		}
+		for k, v := range cr.missingFiles {
+			if err := line("MISSING - " + k + " - " + v); err != nil {
+				return err
+			}
+		}
+		for _, v := range cr.changedFiles {
+			if err := line("CHANGED - " + v.path + " - " + v.oldHash + " ==> " + v.newHash); err != nil {
+				return err
+			}
+		}
+		for _, v := range cr.movedFiles {
+			if err := line("MOVED - " + v.oldPath + " ==> " + v.newPath + " - " + v.hash); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }

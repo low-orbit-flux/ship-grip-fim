@@ -14,22 +14,23 @@ import (
 
 // hostMetrics holds all values collected from one agent in a single scrape.
 type hostMetrics struct {
-	Up               float64
-	ScanRunning      float64
-	CompareRunning   float64
-	ReportsTotal     float64
-	LastReportTime   float64 // unix seconds; 0 if unknown
-	LastScanTime     float64 // unix seconds; 0 if unknown
-	LastScanFiles    float64
-	LastScanDuration float64 // seconds
-	LastCompareTime  float64 // unix seconds; 0 if unknown
+	Up                 float64
+	ScanRunning        float64
+	CompareRunning     float64
+	ReportsTotal       float64
+	LastReportTime     float64 // unix seconds; 0 if unknown
+	LastScanTime       float64 // unix seconds; 0 if unknown
+	LastScanFiles      float64
+	LastScanDuration   float64 // seconds
+	LastCompareTime    float64 // unix seconds; 0 if unknown
 	LastCompareChanged float64
-	LastCompareNew   float64
+	LastCompareNew     float64
 	LastCompareMissing float64
-	LastCompareMoved float64
-	JobsTotal        float64
-	Jobs             []jobMetric
-	CollectDuration  float64 // seconds to query this agent
+	LastCompareMoved   float64
+	JobsTotal          float64
+	Jobs               []jobMetric
+	CollectDuration    float64 // seconds to query this agent
+	DefaultPassword    float64 // 1 if the agent still has the default admin password
 }
 
 // jobMetric holds per-job data from the agent metrics response.
@@ -46,49 +47,51 @@ type fimCollector struct {
 	config configInfo
 
 	// Descriptors — one per metric family.
-	descUp               *prometheus.Desc
-	descScanRunning      *prometheus.Desc
-	descCompareRunning   *prometheus.Desc
-	descReportsTotal     *prometheus.Desc
-	descLastReportTime   *prometheus.Desc
-	descLastScanTime     *prometheus.Desc
-	descLastScanFiles    *prometheus.Desc
-	descLastScanDuration *prometheus.Desc
-	descLastCompareTime  *prometheus.Desc
+	descUp                 *prometheus.Desc
+	descScanRunning        *prometheus.Desc
+	descCompareRunning     *prometheus.Desc
+	descReportsTotal       *prometheus.Desc
+	descLastReportTime     *prometheus.Desc
+	descLastScanTime       *prometheus.Desc
+	descLastScanFiles      *prometheus.Desc
+	descLastScanDuration   *prometheus.Desc
+	descLastCompareTime    *prometheus.Desc
 	descLastCompareChanged *prometheus.Desc
-	descLastCompareNew   *prometheus.Desc
+	descLastCompareNew     *prometheus.Desc
 	descLastCompareMissing *prometheus.Desc
-	descLastCompareMoved *prometheus.Desc
-	descJobsTotal        *prometheus.Desc
-	descJobNextRun       *prometheus.Desc
-	descJobLastRun       *prometheus.Desc
-	descJobLastOk        *prometheus.Desc
-	descCollectDuration  *prometheus.Desc
+	descLastCompareMoved   *prometheus.Desc
+	descJobsTotal          *prometheus.Desc
+	descJobNextRun         *prometheus.Desc
+	descJobLastRun         *prometheus.Desc
+	descJobLastOk          *prometheus.Desc
+	descCollectDuration    *prometheus.Desc
+	descDefaultPassword    *prometheus.Desc
 }
 
 func newFimCollector(config configInfo) *fimCollector {
 	host := []string{"host"}
 	hostJob := []string{"host", "job"}
 	return &fimCollector{
-		config:               config,
-		descUp:               prometheus.NewDesc("fim_up", "1 if the FIM agent is reachable, 0 otherwise", host, nil),
-		descScanRunning:      prometheus.NewDesc("fim_scan_running", "1 if a scan is currently running on the agent", host, nil),
-		descCompareRunning:   prometheus.NewDesc("fim_compare_running", "1 if a compare is currently running on the agent", host, nil),
-		descReportsTotal:     prometheus.NewDesc("fim_reports_total", "Total number of scan reports stored on the agent", host, nil),
-		descLastReportTime:   prometheus.NewDesc("fim_last_report_time_seconds", "Unix timestamp of the most recent scan report file", host, nil),
-		descLastScanTime:     prometheus.NewDesc("fim_last_scan_time_seconds", "Unix timestamp of when the most recent scan completed", host, nil),
-		descLastScanFiles:    prometheus.NewDesc("fim_last_scan_files", "Number of files checksummed in the most recent scan", host, nil),
-		descLastScanDuration: prometheus.NewDesc("fim_last_scan_duration_seconds", "Wall-clock seconds the most recent scan took", host, nil),
-		descLastCompareTime:  prometheus.NewDesc("fim_last_compare_time_seconds", "Unix timestamp of when the most recent compare completed", host, nil),
+		config:                 config,
+		descUp:                 prometheus.NewDesc("fim_up", "1 if the FIM agent is reachable, 0 otherwise", host, nil),
+		descScanRunning:        prometheus.NewDesc("fim_scan_running", "1 if a scan is currently running on the agent", host, nil),
+		descCompareRunning:     prometheus.NewDesc("fim_compare_running", "1 if a compare is currently running on the agent", host, nil),
+		descReportsTotal:       prometheus.NewDesc("fim_reports_total", "Total number of scan reports stored on the agent", host, nil),
+		descLastReportTime:     prometheus.NewDesc("fim_last_report_time_seconds", "Unix timestamp of the most recent scan report file", host, nil),
+		descLastScanTime:       prometheus.NewDesc("fim_last_scan_time_seconds", "Unix timestamp of when the most recent scan completed", host, nil),
+		descLastScanFiles:      prometheus.NewDesc("fim_last_scan_files", "Number of files checksummed in the most recent scan", host, nil),
+		descLastScanDuration:   prometheus.NewDesc("fim_last_scan_duration_seconds", "Wall-clock seconds the most recent scan took", host, nil),
+		descLastCompareTime:    prometheus.NewDesc("fim_last_compare_time_seconds", "Unix timestamp of when the most recent compare completed", host, nil),
 		descLastCompareChanged: prometheus.NewDesc("fim_last_compare_changed_total", "Number of changed files in the most recent compare", host, nil),
-		descLastCompareNew:   prometheus.NewDesc("fim_last_compare_new_total", "Number of new files in the most recent compare", host, nil),
+		descLastCompareNew:     prometheus.NewDesc("fim_last_compare_new_total", "Number of new files in the most recent compare", host, nil),
 		descLastCompareMissing: prometheus.NewDesc("fim_last_compare_missing_total", "Number of missing files in the most recent compare", host, nil),
-		descLastCompareMoved: prometheus.NewDesc("fim_last_compare_moved_total", "Number of moved files in the most recent compare", host, nil),
-		descJobsTotal:        prometheus.NewDesc("fim_jobs_total", "Number of scheduled cron jobs on the agent", host, nil),
-		descJobNextRun:       prometheus.NewDesc("fim_job_next_run_time_seconds", "Unix timestamp of the next scheduled run for this job (0 if not scheduled)", hostJob, nil),
-		descJobLastRun:       prometheus.NewDesc("fim_job_last_run_time_seconds", "Unix timestamp of the last run for this job (0 if never run)", hostJob, nil),
-		descJobLastOk:        prometheus.NewDesc("fim_job_last_run_ok", "1 if the last run of this job completed successfully, 0 otherwise", hostJob, nil),
-		descCollectDuration:  prometheus.NewDesc("fim_collect_duration_seconds", "Seconds spent querying this agent during the last scrape", host, nil),
+		descLastCompareMoved:   prometheus.NewDesc("fim_last_compare_moved_total", "Number of moved files in the most recent compare", host, nil),
+		descJobsTotal:          prometheus.NewDesc("fim_jobs_total", "Number of scheduled cron jobs on the agent", host, nil),
+		descJobNextRun:         prometheus.NewDesc("fim_job_next_run_time_seconds", "Unix timestamp of the next scheduled run for this job (0 if not scheduled)", hostJob, nil),
+		descJobLastRun:         prometheus.NewDesc("fim_job_last_run_time_seconds", "Unix timestamp of the last run for this job (0 if never run)", hostJob, nil),
+		descJobLastOk:          prometheus.NewDesc("fim_job_last_run_ok", "1 if the last run of this job completed successfully, 0 otherwise", hostJob, nil),
+		descCollectDuration:    prometheus.NewDesc("fim_collect_duration_seconds", "Seconds spent querying this agent during the last scrape", host, nil),
+		descDefaultPassword:    prometheus.NewDesc("fim_default_password", "1 if the agent's admin user still has the default password", host, nil),
 	}
 }
 
@@ -112,6 +115,7 @@ func (c *fimCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- c.descJobLastRun
 	ch <- c.descJobLastOk
 	ch <- c.descCollectDuration
+	ch <- c.descDefaultPassword
 }
 
 // Collect queries all configured agents in parallel and emits metrics for each.
@@ -132,7 +136,7 @@ func (c *fimCollector) Collect(ch chan<- prometheus.Metric) {
 		wg.Add(1)
 		go func(idx int, host remoteHost) {
 			defer wg.Done()
-			results[idx] = result{alias: host.alias, m: collectFromHost(host)}
+			results[idx] = result{alias: host.alias, m: collectFromHost(hostConfig(c.config, host), host)}
 		}(i, h)
 	}
 	wg.Wait()
@@ -181,14 +185,15 @@ func (c *fimCollector) Collect(ch chan<- prometheus.Metric) {
 			g(c.descJobLastOk, ok, j.Name)
 		}
 		g(c.descCollectDuration, m.CollectDuration)
+		g(c.descDefaultPassword, m.DefaultPassword)
 	}
 }
 
 // collectFromHost queries a single agent's "metrics" command and parses the
 // key=value response.
-func collectFromHost(h remoteHost) *hostMetrics {
+func collectFromHost(config configInfo, h remoteHost) *hostMetrics {
 	start := time.Now()
-	raw := runRemoteCommandToString(h.address, h.port, []string{"metrics"})
+	raw := runRemoteCommandToString(config, h.address, h.port, []string{"metrics"})
 	elapsed := time.Since(start).Seconds()
 
 	m := &hostMetrics{CollectDuration: elapsed}
@@ -245,6 +250,8 @@ func parseMetricsResponse(raw string, m *hostMetrics) {
 			m.LastCompareMoved = parseMetricFloat(val)
 		case "jobs_total":
 			m.JobsTotal = parseMetricFloat(val)
+		case "default_password":
+			m.DefaultPassword = parseMetricFloat(val)
 		case "last_scan_report":
 			// string label — not a Prometheus metric
 		default:

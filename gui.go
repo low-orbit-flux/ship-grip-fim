@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 	"sync"
 
@@ -29,10 +30,11 @@ func startGUI(config configInfo) {
 
 	tabs := container.NewAppTabs(
 		container.NewTabItem("Scan & Reports", makeLocalTab(config)),
-		container.NewTabItem("Agent",          makeAgentTab(config)),
-		container.NewTabItem("Remote",         makeRemoteTab(config)),
-		container.NewTabItem("Hosts",          makeHostsTab(config)),
-		container.NewTabItem("Schedule",       makeScheduleTab(config)),
+		container.NewTabItem("Agent", makeAgentTab(config)),
+		container.NewTabItem("Remote", makeRemoteTab(config)),
+		container.NewTabItem("Hosts", makeHostsTab(config)),
+		container.NewTabItem("Schedule", makeScheduleTab(config)),
+		container.NewTabItem("Users", makeUsersTab(config)),
 	)
 	tabs.SetTabLocation(container.TabLocationTop)
 
@@ -75,6 +77,24 @@ func roEntry() *widget.Entry {
 	return e
 }
 
+// NOTE on threading: Fyne 2.6+ requires every widget mutation to happen on
+// the main goroutine.  Anything that runs in a `go func()` below performs its
+// I/O first and then applies the UI changes inside fyne.Do(...).  The helpers
+// setText/appendText are plain and must only be called from the main
+// goroutine or from inside a fyne.Do callback.
+
+// credEntries returns user/password entries pre-filled from the config; every
+// tab that talks to an agent shows them next to host/port.
+func credEntries(config configInfo) (*widget.Entry, *widget.Entry) {
+	userEntry := widget.NewEntry()
+	userEntry.SetText(config.agentUser)
+	userEntry.SetPlaceHolder("user")
+	passEntry := widget.NewPasswordEntry()
+	passEntry.SetText(config.agentPassword)
+	passEntry.SetPlaceHolder("password")
+	return userEntry, passEntry
+}
+
 // setText sets the text of an entry regardless of its disabled state.
 func setText(e *widget.Entry, s string) {
 	e.Enable()
@@ -114,7 +134,7 @@ func makeLocalTab(config configInfo) fyne.CanvasObject {
 		compareNew     string
 	)
 
-	statusLabel    := widget.NewLabel("Ready")
+	statusLabel := widget.NewLabel("Ready")
 	compareOldLabel := widget.NewLabel("Old: (none)")
 	compareNewLabel := widget.NewLabel("New: (none)")
 
@@ -134,12 +154,13 @@ func makeLocalTab(config configInfo) fyne.CanvasObject {
 	// currentConfig builds a config snapshot from the current entry values.
 	currentConfig := func() configInfo {
 		cfg := config
-		cfg.path       = pathEntry.Text
+		cfg.path = pathEntry.Text
 		cfg.reportName = reportNameEntry.Text
-		cfg.reportDir  = reportDirEntry.Text
+		cfg.reportDir = reportDirEntry.Text
 		return cfg
 	}
 
+	// refreshList must be called on the main goroutine.
 	refreshList := func() {
 		reports = parseReportList(listReports(currentConfig()))
 		reportList.Refresh()
@@ -150,9 +171,16 @@ func makeLocalTab(config configInfo) fyne.CanvasObject {
 		statusLabel.SetText("Scanning…")
 		cfg := currentConfig()
 		go func() {
-			callScan(cfg)
-			refreshList()
-			statusLabel.SetText("Scan complete")
+			msg := "Scan complete"
+			if err := callScan(cfg); err != nil {
+				msg = "Scan failed: " + err.Error()
+			}
+			newReports := parseReportList(listReports(cfg))
+			fyne.Do(func() {
+				reports = newReports
+				reportList.Refresh()
+				statusLabel.SetText(msg)
+			})
 		}()
 	})
 	scanBtn.Importance = widget.HighImportance
@@ -162,8 +190,10 @@ func makeLocalTab(config configInfo) fyne.CanvasObject {
 		cfg := currentConfig()
 		go func() {
 			result := quickCompareString(cfg)
-			setText(output, result)
-			statusLabel.SetText("Quick compare complete")
+			fyne.Do(func() {
+				setText(output, result)
+				statusLabel.SetText("Quick compare complete")
+			})
 		}()
 	})
 	quickCompareBtn.Importance = widget.WarningImportance
@@ -204,10 +234,13 @@ func makeLocalTab(config configInfo) fyne.CanvasObject {
 		}
 		statusLabel.SetText("Comparing…")
 		cfg := currentConfig()
+		oldID, newID := compareOld, compareNew
 		go func() {
-			result := compareReportsString(cfg, compareOld, compareNew)
-			setText(output, result)
-			statusLabel.SetText("Compare complete — result saved to reportDir")
+			result := compareReportsString(cfg, oldID, newID)
+			fyne.Do(func() {
+				setText(output, result)
+				statusLabel.SetText("Compare complete — result saved to reportDir")
+			})
 		}()
 	})
 	compareBtn.Importance = widget.WarningImportance
@@ -217,9 +250,9 @@ func makeLocalTab(config configInfo) fyne.CanvasObject {
 	// ── layout ──
 	configPanel := container.NewVBox(
 		container.NewGridWithColumns(2,
-			widget.NewLabel("Scan Path:"),    pathEntry,
-			widget.NewLabel("Report Name:"),  reportNameEntry,
-			widget.NewLabel("Report Dir:"),   reportDirEntry,
+			widget.NewLabel("Scan Path:"), pathEntry,
+			widget.NewLabel("Report Name:"), reportNameEntry,
+			widget.NewLabel("Report Dir:"), reportDirEntry,
 		),
 		container.NewHBox(scanBtn, quickCompareBtn, refreshBtn, widget.NewSeparator(), statusLabel),
 	)
@@ -243,7 +276,7 @@ func makeLocalTab(config configInfo) fyne.CanvasObject {
 	)
 	split.SetOffset(0.28)
 
-	go refreshList() // populate on load
+	refreshList() // populate on load
 
 	return container.NewBorder(configPanel, actionBar, nil, nil, split)
 }
@@ -260,7 +293,7 @@ func makeAgentTab(config configInfo) fyne.CanvasObject {
 	agentPortEntry.SetPlaceHolder("port")
 
 	statusLabel := widget.NewLabel("Agent: stopped")
-	logOutput   := roEntry()
+	logOutput := roEntry()
 
 	var (
 		mu     sync.Mutex
@@ -268,7 +301,7 @@ func makeAgentTab(config configInfo) fyne.CanvasObject {
 	)
 
 	startBtn := widget.NewButton("▶  Start Agent", nil)
-	stopBtn  := widget.NewButton("■  Stop Agent",  nil)
+	stopBtn := widget.NewButton("■  Stop Agent", nil)
 	stopBtn.Disable()
 	startBtn.Importance = widget.HighImportance
 
@@ -281,7 +314,7 @@ func makeAgentTab(config configInfo) fyne.CanvasObject {
 
 		cfg := config
 		cfg.agentHost = agentHostEntry.Text
-		cfg.agentPort  = agentPortEntry.Text
+		cfg.agentPort = agentPortEntry.Text
 		stopCh = make(chan struct{})
 		sc := stopCh
 
@@ -297,12 +330,14 @@ func makeAgentTab(config configInfo) fyne.CanvasObject {
 			mu.Lock()
 			stopCh = nil
 			mu.Unlock()
-			statusLabel.SetText("Agent: stopped")
-			startBtn.Enable()
-			stopBtn.Disable()
-			agentHostEntry.Enable()
-			agentPortEntry.Enable()
-			appendText(logOutput, "Agent stopped\n")
+			fyne.Do(func() {
+				statusLabel.SetText("Agent: stopped")
+				startBtn.Enable()
+				stopBtn.Disable()
+				agentHostEntry.Enable()
+				agentPortEntry.Enable()
+				appendText(logOutput, "Agent stopped\n")
+			})
 		}()
 	}
 
@@ -356,7 +391,7 @@ func makeRemoteTab(config configInfo) fyne.CanvasObject {
 		compareNew     string
 	)
 
-	statusLabel     := widget.NewLabel("Idle")
+	statusLabel := widget.NewLabel("Idle")
 	compareOldLabel := widget.NewLabel("Old: (none)")
 	compareNewLabel := widget.NewLabel("New: (none)")
 
@@ -373,46 +408,59 @@ func makeRemoteTab(config configInfo) fyne.CanvasObject {
 		}
 	}
 
-	addr := func() (string, string) { return hostEntry.Text, portEntry.Text }
+	userEntry, passEntry := credEntries(config)
+	addr := func() (configInfo, string, string) {
+		cfg := config
+		cfg.agentUser = userEntry.Text
+		cfg.agentPassword = passEntry.Text
+		return cfg, hostEntry.Text, portEntry.Text
+	}
 
 	statusBtn := widget.NewButton("Status", func() {
-		h, p := addr()
+		cfg, h, p := addr()
+		statusLabel.SetText("Checking…")
 		go func() {
-			statusLabel.SetText("Checking…")
-			result := runRemoteCommandToString(h, p, []string{"status"})
-			statusLabel.SetText(strings.TrimSpace(result))
+			result := runRemoteCommandToString(cfg, h, p, []string{"status"})
+			fyne.Do(func() { statusLabel.SetText(strings.TrimSpace(result)) })
 		}()
 	})
 
 	listBtn := widget.NewButton("⟳  List Reports", func() {
-		h, p := addr()
+		cfg, h, p := addr()
 		statusLabel.SetText("Listing…")
 		go func() {
-			raw := runRemoteCommandToString(h, p, []string{"list"})
-			remoteReports = parseReportList(raw)
-			remoteList.Refresh()
-			statusLabel.SetText(fmt.Sprintf("%d reports", len(remoteReports)))
+			raw := runRemoteCommandToString(cfg, h, p, []string{"list"})
+			list := parseReportList(raw)
+			fyne.Do(func() {
+				remoteReports = list
+				remoteList.Refresh()
+				statusLabel.SetText(fmt.Sprintf("%d reports", len(remoteReports)))
+			})
 		}()
 	})
 
 	scanBtn := widget.NewButton("▶  Scan", func() {
-		h, p := addr()
+		cfg, h, p := addr()
 		statusLabel.SetText("Scan running on remote…")
 		go func() {
-			result := runRemoteCommandToString(h, p, []string{"scan"})
-			setText(output, result)
-			statusLabel.SetText("Scan complete")
+			result := runRemoteCommandToString(cfg, h, p, []string{"scan"})
+			fyne.Do(func() {
+				setText(output, result)
+				statusLabel.SetText("Scan complete")
+			})
 		}()
 	})
 	scanBtn.Importance = widget.HighImportance
 
 	remoteQCBtn := widget.NewButton("⚡  Quick Compare", func() {
-		h, p := addr()
+		cfg, h, p := addr()
 		statusLabel.SetText("Quick compare on remote…")
 		go func() {
-			result := runRemoteCommandToString(h, p, []string{"quickcompare"})
-			setText(output, result)
-			statusLabel.SetText("Quick compare complete")
+			result := runRemoteCommandToString(cfg, h, p, []string{"quickcompare"})
+			fyne.Do(func() {
+				setText(output, result)
+				statusLabel.SetText("Quick compare complete")
+			})
 		}()
 	})
 	remoteQCBtn.Importance = widget.WarningImportance
@@ -422,8 +470,12 @@ func makeRemoteTab(config configInfo) fyne.CanvasObject {
 			setText(output, "Select a report first.")
 			return
 		}
-		h, p := addr()
-		go func() { setText(output, runRemoteCommandToString(h, p, []string{"data", selectedRemote})) }()
+		cfg, h, p := addr()
+		id := selectedRemote
+		go func() {
+			result := runRemoteCommandToString(cfg, h, p, []string{"data", id})
+			fyne.Do(func() { setText(output, result) })
+		}()
 	})
 
 	setOldBtn := widget.NewButton("Set as Old", func() {
@@ -447,12 +499,15 @@ func makeRemoteTab(config configInfo) fyne.CanvasObject {
 			setText(output, "Set both Old and New reports before comparing.")
 			return
 		}
-		h, p := addr()
+		cfg, h, p := addr()
 		statusLabel.SetText("Comparing on remote…")
+		oldID, newID := compareOld, compareNew
 		go func() {
-			result := runRemoteCommandToString(h, p, []string{"compare", compareOld, compareNew})
-			setText(output, result)
-			statusLabel.SetText("Compare complete")
+			result := runRemoteCommandToString(cfg, h, p, []string{"compare", oldID, newID})
+			fyne.Do(func() {
+				setText(output, result)
+				statusLabel.SetText("Compare complete")
+			})
 		}()
 	})
 	compareBtn.Importance = widget.WarningImportance
@@ -462,6 +517,8 @@ func makeRemoteTab(config configInfo) fyne.CanvasObject {
 	topBar := container.NewHBox(
 		widget.NewLabel("Host:"), hostEntry,
 		widget.NewLabel("Port:"), portEntry,
+		widget.NewLabel("User:"), userEntry,
+		widget.NewLabel("Pass:"), passEntry,
 		statusBtn, listBtn, scanBtn, remoteQCBtn,
 		widget.NewSeparator(), statusLabel,
 	)
@@ -495,7 +552,7 @@ func makeHostsTab(config configInfo) fyne.CanvasObject {
 	hostsConfigEntry.SetText(config.hostsConfig)
 	hostsConfigEntry.SetPlaceHolder("hosts.conf path")
 
-	output      := roEntry()
+	output := roEntry()
 	statusLabel := widget.NewLabel("No hosts loaded")
 
 	var (
@@ -507,7 +564,7 @@ func makeHostsTab(config configInfo) fyne.CanvasObject {
 	// Row 0 is the header; data rows start at 1.
 	const numCols = 6
 	colHeaders := []string{"Alias", "Address", "Port", "Path", "Report Name", "SSH User"}
-	colWidths  := []float32{120, 160, 60, 200, 160, 100}
+	colWidths := []float32{120, 160, 60, 200, 160, 100}
 
 	hostsTable := widget.NewTable(
 		func() (int, int) {
@@ -570,6 +627,7 @@ func makeHostsTab(config configInfo) fyne.CanvasObject {
 			setText(output, "No hosts loaded.")
 			return
 		}
+		cfg := currentCfg()
 		statusLabel.SetText("Pinging…")
 		go func() {
 			results := make([]hostResult, len(snapshot))
@@ -578,7 +636,7 @@ func makeHostsTab(config configInfo) fyne.CanvasObject {
 				wg.Add(1)
 				go func(idx int, host remoteHost) {
 					defer wg.Done()
-					out := runRemoteCommandToString(host.address, host.port, []string{"status"})
+					out := runRemoteCommandToString(hostConfig(cfg, host), host.address, host.port, []string{"status"})
 					results[idx] = hostResult{alias: host.alias, output: strings.TrimSpace(out)}
 				}(i, h)
 			}
@@ -590,8 +648,10 @@ func makeHostsTab(config configInfo) fyne.CanvasObject {
 			for _, r := range results {
 				sb.WriteString(fmt.Sprintf("%-18s %s\n", r.alias, r.output))
 			}
-			setText(output, sb.String())
-			statusLabel.SetText("Ping complete")
+			fyne.Do(func() {
+				setText(output, sb.String())
+				statusLabel.SetText("Ping complete")
+			})
 		}()
 	})
 
@@ -609,11 +669,14 @@ func makeHostsTab(config configInfo) fyne.CanvasObject {
 		setText(output, "")
 		go func() {
 			for _, h := range snapshot {
-				appendText(output, fmt.Sprintf("[%s] syncing…\n", h.alias))
+				alias := h.alias
+				fyne.Do(func() { appendText(output, fmt.Sprintf("[%s] syncing…\n", alias)) })
 				syncHostReports(cfg, h)
 			}
-			statusLabel.SetText("Sync complete")
-			appendText(output, "\nAll hosts synced.\n")
+			fyne.Do(func() {
+				statusLabel.SetText("Sync complete")
+				appendText(output, "\nAll hosts synced.\n")
+			})
 		}()
 	})
 
@@ -634,6 +697,7 @@ func makeHostsTab(config configInfo) fyne.CanvasObject {
 		if len(cmdArgs) == 0 {
 			return
 		}
+		cfg := currentCfg()
 		statusLabel.SetText("Running…")
 		go func() {
 			results := make([]hostResult, len(snapshot))
@@ -642,7 +706,7 @@ func makeHostsTab(config configInfo) fyne.CanvasObject {
 				wg.Add(1)
 				go func(idx int, host remoteHost) {
 					defer wg.Done()
-					out := runRemoteCommandToString(host.address, host.port, cmdArgs)
+					out := runRemoteCommandToString(hostConfig(cfg, host), host.address, host.port, cmdArgs)
 					results[idx] = hostResult{alias: host.alias, output: out}
 				}(i, h)
 			}
@@ -651,8 +715,10 @@ func makeHostsTab(config configInfo) fyne.CanvasObject {
 			for _, r := range results {
 				sb.WriteString(fmt.Sprintf("=== %s ===\n%s\n", r.alias, r.output))
 			}
-			setText(output, sb.String())
-			statusLabel.SetText("Done")
+			fyne.Do(func() {
+				setText(output, sb.String())
+				statusLabel.SetText("Done")
+			})
 		}()
 	})
 
@@ -669,9 +735,8 @@ func makeHostsTab(config configInfo) fyne.CanvasObject {
 		statusLabel.SetText("Starting agents…")
 		go func() {
 			cmdStartAgent(cfg, "") // empty alias = all hosts
-			statusLabel.SetText("Start commands sent")
+			fyne.Do(func() { statusLabel.SetText("Start commands sent") })
 		}()
-		_ = cfg
 	})
 
 	clearBtn := widget.NewButton("Clear", func() { setText(output, "") })
@@ -696,7 +761,7 @@ func makeHostsTab(config configInfo) fyne.CanvasObject {
 	)
 	split.SetOffset(0.45)
 
-	go loadHosts() // try to load on startup
+	loadHosts() // try to load on startup
 
 	return container.NewBorder(topBar, actionBar, nil, nil, split)
 }
@@ -714,13 +779,19 @@ func makeScheduleTab(config configInfo) fyne.CanvasObject {
 	portEntry.SetPlaceHolder("port")
 
 	statusLabel := widget.NewLabel("Not connected")
-	output      := roEntry()
+	output := roEntry()
 
-	addr := func() (string, string) { return hostEntry.Text, portEntry.Text }
+	userEntry, passEntry := credEntries(config)
+	addr := func() (configInfo, string, string) {
+		cfg := config
+		cfg.agentUser = userEntry.Text
+		cfg.agentPassword = passEntry.Text
+		return cfg, hostEntry.Text, portEntry.Text
+	}
 
 	// ── scheduled jobs table ──
 	const jobCols = 4
-	jobHeaders  := []string{"Name", "Schedule", "Command", "Next Run"}
+	jobHeaders := []string{"Name", "Schedule", "Command", "Next Run"}
 	jobColWidths := []float32{150, 180, 90, 180}
 
 	var (
@@ -770,7 +841,7 @@ func makeScheduleTab(config configInfo) fyne.CanvasObject {
 
 	// ── history table ──
 	const histCols = 4
-	histHeaders   := []string{"Name", "Start", "End", "Status"}
+	histHeaders := []string{"Name", "Start", "End", "Status"}
 	histColWidths := []float32{150, 180, 180, 160}
 
 	var (
@@ -807,29 +878,31 @@ func makeScheduleTab(config configInfo) fyne.CanvasObject {
 	}
 
 	// ── refresh: fetch schedule list and history from agent ──
-	refresh := func() {
-		h, p := addr()
-		go func() {
-			statusLabel.SetText("Fetching…")
+	// refreshFrom does the network I/O synchronously in the calling goroutine
+	// and hands every UI update to the main goroutine via fyne.Do, so it is
+	// safe to call from any background goroutine.
+	refreshFrom := func(cfg configInfo, h, p string) {
+		fyne.Do(func() { statusLabel.SetText("Fetching…") })
 
-			// jobs list
-			raw := runRemoteCommandToString(h, p, []string{"schedule", "list"})
-			newJobRows := parseScheduleList(raw)
-			jobsMu.Lock()
-			jobRows = newJobRows
-			jobsMu.Unlock()
+		// jobs list
+		raw := runRemoteCommandToString(cfg, h, p, []string{"schedule", "list"})
+		newJobRows := parseScheduleList(raw)
+		jobsMu.Lock()
+		jobRows = newJobRows
+		jobsMu.Unlock()
+
+		// history
+		rawHist := runRemoteCommandToString(cfg, h, p, []string{"schedule", "history"})
+		newHist := parseHistoryList(rawHist)
+		histMu.Lock()
+		histRows = newHist
+		histMu.Unlock()
+
+		fyne.Do(func() {
 			jobsTable.Refresh()
-
-			// history
-			rawHist := runRemoteCommandToString(h, p, []string{"schedule", "history"})
-			newHist := parseHistoryList(rawHist)
-			histMu.Lock()
-			histRows = newHist
-			histMu.Unlock()
 			histTable.Refresh()
-
 			statusLabel.SetText(fmt.Sprintf("%d jobs, %d history entries", len(newJobRows), len(newHist)))
-		}()
+		})
 	}
 
 	// ── add job form ──
@@ -850,12 +923,12 @@ func makeScheduleTab(config configInfo) fyne.CanvasObject {
 			setText(output, "Name and schedule are required.")
 			return
 		}
-		h, p := addr()
+		cfg, h, p := addr()
 		payload := name + "|" + cronExpr + "|" + cmd
 		go func() {
-			result := runRemoteCommandToString(h, p, []string{"schedule", "add", payload})
-			setText(output, strings.TrimSpace(result))
-			refresh()
+			result := runRemoteCommandToString(cfg, h, p, []string{"schedule", "add", payload})
+			fyne.Do(func() { setText(output, strings.TrimSpace(result)) })
+			refreshFrom(cfg, h, p)
 		}()
 	})
 	addBtn.Importance = widget.HighImportance
@@ -865,18 +938,23 @@ func makeScheduleTab(config configInfo) fyne.CanvasObject {
 			setText(output, "Select a job from the table first.")
 			return
 		}
-		h, p := addr()
+		cfg, h, p := addr()
 		name := selectedJobName
 		go func() {
-			result := runRemoteCommandToString(h, p, []string{"schedule", "remove", name})
-			setText(output, strings.TrimSpace(result))
-			selectedJobName = ""
-			refresh()
+			result := runRemoteCommandToString(cfg, h, p, []string{"schedule", "remove", name})
+			fyne.Do(func() {
+				setText(output, strings.TrimSpace(result))
+				selectedJobName = ""
+			})
+			refreshFrom(cfg, h, p)
 		}()
 	})
 	removeBtn.Importance = widget.DangerImportance
 
-	refreshBtn := widget.NewButton("⟳  Refresh", func() { refresh() })
+	refreshBtn := widget.NewButton("⟳  Refresh", func() {
+		cfg, h, p := addr()
+		go refreshFrom(cfg, h, p)
+	})
 
 	clearBtn := widget.NewButton("Clear", func() { setText(output, "") })
 
@@ -884,6 +962,8 @@ func makeScheduleTab(config configInfo) fyne.CanvasObject {
 	topBar := container.NewHBox(
 		widget.NewLabel("Agent:"), hostEntry,
 		widget.NewLabel("Port:"), portEntry,
+		widget.NewLabel("User:"), userEntry,
+		widget.NewLabel("Pass:"), passEntry,
 		refreshBtn,
 		widget.NewSeparator(), statusLabel,
 	)
@@ -923,24 +1003,149 @@ func makeScheduleTab(config configInfo) fyne.CanvasObject {
 	)
 }
 
+// ── Tab 6: Users ──────────────────────────────────────────────────────────────
+
+// makeUsersTab manages the agent users file, either the local file directly or
+// a remote agent's file through its (authenticated) "user" command.
+func makeUsersTab(config configInfo) fyne.CanvasObject {
+	const targetLocal, targetRemote = "Local users file", "Remote agent"
+	target := widget.NewRadioGroup([]string{targetLocal, targetRemote}, nil)
+	target.Horizontal = true
+	target.SetSelected(targetLocal)
+
+	usersDBEntry := widget.NewEntry()
+	usersDBEntry.SetText(config.usersDB)
+	usersDBEntry.SetPlaceHolder("users.db path")
+
+	hostEntry := widget.NewEntry()
+	hostEntry.SetText(config.agentHost)
+	hostEntry.SetPlaceHolder("agent host")
+	portEntry := widget.NewEntry()
+	portEntry.SetText(config.agentPort)
+	portEntry.SetPlaceHolder("port")
+	userEntry, passEntry := credEntries(config)
+
+	nameEntry := widget.NewEntry()
+	nameEntry.SetPlaceHolder("user name")
+	newPassEntry := widget.NewPasswordEntry()
+	newPassEntry.SetPlaceHolder("password (min 8 chars)")
+	roleSelect := widget.NewSelect([]string{roleRO, roleRW, roleAdmin}, nil)
+	roleSelect.SetSelected(roleRO)
+
+	statusLabel := widget.NewLabel("Ready")
+	output := roEntry()
+
+	run := func(args []string) {
+		local := target.Selected == targetLocal
+		cfg := config
+		cfg.usersDB = usersDBEntry.Text
+		cfg.agentUser = userEntry.Text
+		cfg.agentPassword = passEntry.Text
+		h, p := hostEntry.Text, portEntry.Text
+		statusLabel.SetText("Working…")
+		go func() {
+			var out string
+			if local {
+				out = userCommand(cfg.usersDB, args)
+			} else {
+				out = runRemoteCommandToString(cfg, h, p, append([]string{"user"}, args...))
+			}
+			fyne.Do(func() {
+				setText(output, out)
+				statusLabel.SetText("Done")
+			})
+		}()
+	}
+
+	needName := func() (string, bool) {
+		name := strings.TrimSpace(nameEntry.Text)
+		if name == "" {
+			setText(output, "Enter a user name first.")
+			return "", false
+		}
+		return name, true
+	}
+
+	listBtn := widget.NewButton("List Users", func() { run([]string{"list"}) })
+	addBtn := widget.NewButton("Add", func() {
+		if name, ok := needName(); ok {
+			run([]string{"add", name, newPassEntry.Text, roleSelect.Selected})
+		}
+	})
+	addBtn.Importance = widget.HighImportance
+	roleBtn := widget.NewButton("Set Role", func() {
+		if name, ok := needName(); ok {
+			run([]string{"role", name, roleSelect.Selected})
+		}
+	})
+	passwdBtn := widget.NewButton("Set Password", func() {
+		if name, ok := needName(); ok {
+			run([]string{"passwd", name, newPassEntry.Text})
+		}
+	})
+	removeBtn := widget.NewButton("Remove", func() {
+		if name, ok := needName(); ok {
+			run([]string{"remove", name})
+		}
+	})
+	removeBtn.Importance = widget.DangerImportance
+	clearBtn := widget.NewButton("Clear", func() { setText(output, "") })
+
+	info := widget.NewLabel(
+		"Local: edits the users file on this machine (used by an agent or web GUI started here).\n" +
+			"Remote: connects to an agent with the credentials on the right (admin role needed) and manages its users file.\n" +
+			"Roles: ro = view/compare reports, rw = ro + scans and schedules, admin = rw + manage users.\n" +
+			"A fresh install has the default user \"" + defaultAdminUser + "\" / \"" + defaultAdminPassword + "\" - change it first.",
+	)
+
+	targetBar := container.NewHBox(
+		target,
+		widget.NewSeparator(),
+		widget.NewLabel("Users file:"), usersDBEntry,
+		widget.NewSeparator(),
+		widget.NewLabel("Agent:"), hostEntry,
+		widget.NewLabel("Port:"), portEntry,
+		widget.NewLabel("User:"), userEntry,
+		widget.NewLabel("Pass:"), passEntry,
+	)
+	editBar := container.NewHBox(
+		widget.NewLabel("Name:"), nameEntry,
+		widget.NewLabel("New password:"), newPassEntry,
+		widget.NewLabel("Role:"), roleSelect,
+		listBtn, addBtn, passwdBtn, roleBtn, removeBtn,
+		widget.NewSeparator(), clearBtn,
+		widget.NewSeparator(), statusLabel,
+	)
+
+	return container.NewBorder(
+		container.NewVBox(info, targetBar, editBar),
+		nil, nil, nil,
+		container.NewScroll(output),
+	)
+}
+
 type schedJobRow struct{ name, schedule, command, next string }
-type histJobRow  struct{ name, start, end, status string }
+type histJobRow struct{ name, start, end, status string }
+
+// The agent's "schedule list" / "schedule history" output is a padded text
+// table.  Cron expressions ("0 2 * * *") and timestamps ("2025-09-26 02:00:00")
+// contain spaces, so the rows cannot be split on whitespace; instead match
+// each line by the shape of its columns.
+var (
+	tsPat        = `\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}`
+	scheduleLine = regexp.MustCompile(`^(\S+)\s+(.+?)\s+(\S+)\s+(` + tsPat + `|-)\s*$`)
+	historyLine  = regexp.MustCompile(`^(\S+)\s+(` + tsPat + `)\s+(` + tsPat + `|-)\s+(.*?)\s*$`)
+)
 
 // parseScheduleList converts the text output of "schedule list" into table rows.
 func parseScheduleList(raw string) []schedJobRow {
 	var out []schedJobRow
-	for i, line := range strings.Split(raw, "\n") {
-		if i < 2 { continue } // skip header + separator
-		line = strings.TrimSpace(line)
-		if line == "" { continue }
-		fields := splitFields(line, 4)
-		if len(fields) < 4 { continue }
-		out = append(out, schedJobRow{
-			name:     fields[0],
-			schedule: fields[1],
-			command:  fields[2],
-			next:     fields[3],
-		})
+	for _, line := range strings.Split(raw, "\n") {
+		m := scheduleLine.FindStringSubmatch(strings.TrimSpace(line))
+		if m == nil || m[1] == "NAME" {
+			continue // header, separator, blank or malformed line
+		}
+		out = append(out, schedJobRow{name: m[1], schedule: m[2], command: m[3], next: m[4]})
 	}
 	return out
 }
@@ -948,29 +1153,12 @@ func parseScheduleList(raw string) []schedJobRow {
 // parseHistoryList converts the text output of "schedule history" into table rows.
 func parseHistoryList(raw string) []histJobRow {
 	var out []histJobRow
-	for i, line := range strings.Split(raw, "\n") {
-		if i < 2 { continue }
-		line = strings.TrimSpace(line)
-		if line == "" { continue }
-		fields := splitFields(line, 4)
-		if len(fields) < 4 { continue }
-		out = append(out, histJobRow{
-			name:   fields[0],
-			start:  fields[1],
-			end:    fields[2],
-			status: fields[3],
-		})
+	for _, line := range strings.Split(raw, "\n") {
+		m := historyLine.FindStringSubmatch(strings.TrimSpace(line))
+		if m == nil {
+			continue
+		}
+		out = append(out, histJobRow{name: m[1], start: m[2], end: m[3], status: m[4]})
 	}
 	return out
-}
-
-// splitFields splits a fixed-width text line into at most n fields by
-// collapsing runs of spaces as delimiters.
-func splitFields(s string, n int) []string {
-	parts := strings.Fields(s)
-	if len(parts) <= n {
-		return parts
-	}
-	// Merge trailing parts back into the last field.
-	return append(parts[:n-1], strings.Join(parts[n-1:], " "))
 }

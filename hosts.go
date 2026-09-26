@@ -5,22 +5,41 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 )
 
 // remoteHost holds configuration for one remote agent.
 // hosts.conf format (pipe-delimited, one host per line):
-//   alias|address|port|path|reportName[|sshUser[|binaryPath]]
+//
+//	alias|address|port|path|reportName[|sshUser[|binaryPath[|agentUser[|agentPassword]]]]
+//
 // sshUser and binaryPath are only required for the 'start' command.
+// agentUser / agentPassword override the agentUser / agentPassword settings
+// from integrity.conf for this host only.
 type remoteHost struct {
-	alias      string
-	address    string
-	port       string
-	path       string
-	reportName string
-	sshUser    string
-	binaryPath string
+	alias         string
+	address       string
+	port          string
+	path          string
+	reportName    string
+	sshUser       string
+	binaryPath    string
+	agentUser     string
+	agentPassword string
+}
+
+// hostConfig returns config with this host's credential overrides applied.
+// Every remote call for a configured host should go through it.
+func hostConfig(config configInfo, h remoteHost) configInfo {
+	if h.agentUser != "" {
+		config.agentUser = h.agentUser
+	}
+	if h.agentPassword != "" {
+		config.agentPassword = h.agentPassword
+	}
+	return config
 }
 
 func parseHostsConfig(hostsConfigPath string) ([]remoteHost, error) {
@@ -44,18 +63,15 @@ func parseHostsConfig(hostsConfigPath string) ([]remoteHost, error) {
 			fmt.Printf("WARN - hosts.conf line %d skipped (need at least 5 fields): %s\n", lineNum, line)
 			continue
 		}
-		h := remoteHost{
-			alias:      strings.TrimSpace(parts[0]),
-			address:    strings.TrimSpace(parts[1]),
-			port:       strings.TrimSpace(parts[2]),
-			path:       strings.TrimSpace(parts[3]),
-			reportName: strings.TrimSpace(parts[4]),
+		for i := range parts {
+			parts[i] = strings.TrimSpace(parts[i])
 		}
-		if len(parts) >= 6 {
-			h.sshUser = strings.TrimSpace(parts[5])
-		}
-		if len(parts) >= 7 {
-			h.binaryPath = strings.TrimSpace(parts[6])
+		h := remoteHost{alias: parts[0], address: parts[1], port: parts[2], path: parts[3], reportName: parts[4]}
+		opt := []*string{&h.sshUser, &h.binaryPath, &h.agentUser, &h.agentPassword}
+		for i, dst := range opt {
+			if len(parts) > 5+i {
+				*dst = parts[5+i]
+			}
 		}
 		hosts = append(hosts, h)
 	}
@@ -73,12 +89,16 @@ func cmdHosts(config configInfo) {
 		fmt.Println("No hosts configured in", config.hostsConfig)
 		return
 	}
-	fmt.Printf("%-18s %-20s %-6s %-25s %-20s %s\n",
-		"ALIAS", "ADDRESS", "PORT", "PATH", "REPORT_NAME", "SSH_USER")
-	fmt.Println(strings.Repeat("-", 100))
+	fmt.Printf("%-18s %-20s %-6s %-25s %-20s %-10s %s\n",
+		"ALIAS", "ADDRESS", "PORT", "PATH", "REPORT_NAME", "SSH_USER", "AGENT_USER")
+	fmt.Println(strings.Repeat("-", 110))
 	for _, h := range hosts {
-		fmt.Printf("%-18s %-20s %-6s %-25s %-20s %s\n",
-			h.alias, h.address, h.port, h.path, h.reportName, h.sshUser)
+		agentUser := h.agentUser
+		if agentUser == "" {
+			agentUser = config.agentUser + " (default)"
+		}
+		fmt.Printf("%-18s %-20s %-6s %-25s %-20s %-10s %s\n",
+			h.alias, h.address, h.port, h.path, h.reportName, h.sshUser, agentUser)
 	}
 }
 
@@ -86,6 +106,43 @@ func cmdHosts(config configInfo) {
 type hostResult struct {
 	alias  string
 	output string
+}
+
+// runOnAllHosts runs cmdArgs on every host in parallel and returns the
+// outputs in hosts.conf order.
+func runOnAllHosts(config configInfo, hosts []remoteHost, cmdArgs []string) []hostResult {
+	results := make([]hostResult, len(hosts))
+	var wg sync.WaitGroup
+	for i, h := range hosts {
+		wg.Add(1)
+		go func(idx int, host remoteHost) {
+			defer wg.Done()
+			out := runRemoteCommandToString(hostConfig(config, host), host.address, host.port, cmdArgs)
+			results[idx] = hostResult{alias: host.alias, output: out}
+		}(i, h)
+	}
+	wg.Wait()
+	return results
+}
+
+// pingAllString returns the status table for every configured host.
+func pingAllString(config configInfo, hosts []remoteHost) string {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("%-18s %s\n", "ALIAS", "STATUS"))
+	sb.WriteString(strings.Repeat("-", 45) + "\n")
+	for _, r := range runOnAllHosts(config, hosts, []string{"status"}) {
+		sb.WriteString(fmt.Sprintf("%-18s %s\n", r.alias, strings.TrimSpace(r.output)))
+	}
+	return sb.String()
+}
+
+// remoteAllString returns each host's output for cmdArgs, prefixed with a header.
+func remoteAllString(config configInfo, hosts []remoteHost, cmdArgs []string) string {
+	var sb strings.Builder
+	for _, r := range runOnAllHosts(config, hosts, cmdArgs) {
+		sb.WriteString(fmt.Sprintf("=== %s ===\n%s\n", r.alias, r.output))
+	}
+	return sb.String()
 }
 
 // cmdPingAll checks the status of every configured agent in parallel.
@@ -99,24 +156,7 @@ func cmdPingAll(config configInfo) {
 		fmt.Println("No hosts configured in", config.hostsConfig)
 		return
 	}
-
-	results := make([]hostResult, len(hosts))
-	var wg sync.WaitGroup
-	for i, h := range hosts {
-		wg.Add(1)
-		go func(idx int, host remoteHost) {
-			defer wg.Done()
-			out := runRemoteCommandToString(host.address, host.port, []string{"status"})
-			results[idx] = hostResult{alias: host.alias, output: strings.TrimSpace(out)}
-		}(i, h)
-	}
-	wg.Wait()
-
-	fmt.Printf("%-18s %s\n", "ALIAS", "STATUS")
-	fmt.Println(strings.Repeat("-", 45))
-	for _, r := range results {
-		fmt.Printf("%-18s %s\n", r.alias, r.output)
-	}
+	fmt.Print(pingAllString(config, hosts))
 }
 
 // cmdRemoteAll runs cmdArgs on every configured agent in parallel and prints
@@ -131,22 +171,7 @@ func cmdRemoteAll(config configInfo, cmdArgs []string) {
 		fmt.Println("No hosts configured in", config.hostsConfig)
 		return
 	}
-
-	results := make([]hostResult, len(hosts))
-	var wg sync.WaitGroup
-	for i, h := range hosts {
-		wg.Add(1)
-		go func(idx int, host remoteHost) {
-			defer wg.Done()
-			out := runRemoteCommandToString(host.address, host.port, cmdArgs)
-			results[idx] = hostResult{alias: host.alias, output: out}
-		}(i, h)
-	}
-	wg.Wait()
-
-	for _, r := range results {
-		fmt.Printf("=== %s ===\n%s\n", r.alias, r.output)
-	}
+	fmt.Print(remoteAllString(config, hosts, cmdArgs))
 }
 
 // cmdStartAgent starts the agent on one host (by alias) or all hosts if alias == "".
@@ -175,10 +200,12 @@ func startAgentOnHost(h remoteHost) {
 		return
 	}
 	target := h.sshUser + "@" + h.address
-	// Run as background process on the remote host; log to /tmp
+	// Run from the binary's directory so integrity.conf, users.db and the
+	// certificate files are found next to it; log beside the binary too.
+	dir := filepath.Dir(h.binaryPath)
 	remoteCmd := fmt.Sprintf(
-		"nohup %s --agentHost=0.0.0.0 --agentPort=%s agent > /tmp/ship-grip-fim-agent.log 2>&1 &",
-		h.binaryPath, h.port,
+		"cd %q && nohup %q --agentHost=0.0.0.0 --agentPort=%s agent > agent.log 2>&1 &",
+		dir, h.binaryPath, h.port,
 	)
 	fmt.Printf("[%s] Starting agent on %s ...\n", h.alias, target)
 	cmd := exec.Command("ssh", "-o", "BatchMode=yes", target, remoteCmd)
@@ -187,5 +214,5 @@ func startAgentOnHost(h remoteHost) {
 		fmt.Printf("[%s] ERROR - ssh failed: %v\n%s\n", h.alias, err, string(out))
 		return
 	}
-	fmt.Printf("[%s] Agent started (port %s)\n", h.alias, h.port)
+	fmt.Printf("[%s] Agent started (port %s, log: %s/agent.log)\n", h.alias, h.port, dir)
 }

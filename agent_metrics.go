@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"strings"
 	"time"
@@ -14,7 +13,7 @@ import (
 // initAgentState seeds state.lastScan and state.lastCompare from the report
 // directory so metrics are meaningful even right after an agent restart.
 func initAgentState(config configInfo) {
-	files, err := ioutil.ReadDir(config.reportDir)
+	files, err := os.ReadDir(config.reportDir)
 	if err != nil {
 		return // report dir missing or unreadable — fine on first run
 	}
@@ -104,6 +103,7 @@ func agentMetricsString(config configInfo) string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("scan_running=%d\n", b2i(scanRunning)))
 	sb.WriteString(fmt.Sprintf("compare_running=%d\n", b2i(compareRunning)))
+	sb.WriteString(fmt.Sprintf("default_password=%d\n", b2i(usingDefaultPassword(config.usersDB))))
 
 	// Report inventory from disk.
 	scanReports := listScanReportNames(config)
@@ -163,13 +163,13 @@ func agentMetricsString(config configInfo) string {
 // listScanReportNames returns all filenames in reportDir that are scan reports
 // (i.e. do NOT start with "compare__").
 func listScanReportNames(config configInfo) []string {
-	files, err := ioutil.ReadDir(config.reportDir)
+	files, err := os.ReadDir(config.reportDir)
 	if err != nil {
 		return nil
 	}
 	var out []string
 	for _, f := range files {
-		if !strings.HasPrefix(f.Name(), "compare__") {
+		if !f.IsDir() && !strings.HasPrefix(f.Name(), "compare__") {
 			out = append(out, f.Name())
 		}
 	}
@@ -204,11 +204,12 @@ func parseReportTimestamp(filename string) time.Time {
 	}
 	datePart := tok[len(tok)-2]
 	timePart := tok[len(tok)-1]
-	t, err := time.ParseInLocation("2006-01-02 15:04:05", datePart+" "+timePart, time.Local)
-	if err != nil {
-		return time.Time{}
+	for _, layout := range []string{"2006-01-02 15-04-05", "2006-01-02 15:04:05"} { // current and legacy formats
+		if t, err := time.ParseInLocation(layout, datePart+" "+timePart, time.Local); err == nil {
+			return t
+		}
 	}
-	return t
+	return time.Time{}
 }
 
 // extractReportName strips the trailing timestamp from a scan report filename

@@ -208,15 +208,16 @@ func (s *agentScheduler) runJob(name, command string) {
 	s.recordRun(name, startTime, time.Time{}, "running")
 	fmt.Printf("[scheduler] Starting job %q (%s)\n", name, command)
 
-	var runStatus string
+	runStatus := "complete"
 	func() {
 		defer func() {
 			if r := recover(); r != nil {
 				runStatus = fmt.Sprintf("error: %v", r)
 			}
 		}()
-		callScan(s.config)
-		runStatus = "complete"
+		if err := callScan(s.config); err != nil {
+			runStatus = "error: " + err.Error()
+		}
 	}()
 
 	endTime := time.Now()

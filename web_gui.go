@@ -3,10 +3,11 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"html/template"
 	"net/http"
 	"strings"
 	"sync"
-	"text/template"
+	"time"
 )
 
 // ── web GUI state ─────────────────────────────────────────────────────────────
@@ -28,27 +29,77 @@ func startWebGUI(config configInfo) {
 		return func(w http.ResponseWriter, r *http.Request) { fn(config, w, r) }
 	}
 
-	mux.HandleFunc("/", h(webIndex))
-	mux.HandleFunc("/api/reports", h(webListReports))
-	mux.HandleFunc("/api/report/", h(webGetReport))
-	mux.HandleFunc("/api/scan", h(webScan))
-	mux.HandleFunc("/api/compare", h(webCompare))
-	mux.HandleFunc("/api/quickcompare", h(webQuickCompare))
-	mux.HandleFunc("/api/status", h(webStatus))
-	mux.HandleFunc("/api/agent/start", h(webAgentStart))
-	mux.HandleFunc("/api/agent/stop", func(w http.ResponseWriter, r *http.Request) { webAgentStop(w, r) })
-	mux.HandleFunc("/api/remote", func(w http.ResponseWriter, r *http.Request) { webRemote(w, r) })
-	mux.HandleFunc("/api/hosts", h(webHosts))
-	mux.HandleFunc("/api/hosts/pingall", h(webPingAll))
-	mux.HandleFunc("/api/hosts/sync", h(webSyncAll))
-	mux.HandleFunc("/api/hosts/start", h(webStartAll))
-	mux.HandleFunc("/api/hosts/remoteall", h(webRemoteAll))
+	// Every page and API call requires a login; the role next to each route
+	// is the minimum role (see auth.go).  ro: view/compare, rw: scans and
+	// schedules, admin: users.  /api/remote and /api/hosts/remoteall derive
+	// the role from the command being proxied, like the agent does.
+	secure := config.webTLS
+	ro := func(fn http.HandlerFunc) http.HandlerFunc { return requireRole(roleRO, secure, fn) }
+	rw := func(fn http.HandlerFunc) http.HandlerFunc { return requireRole(roleRW, secure, fn) }
+	admin := func(fn http.HandlerFunc) http.HandlerFunc { return requireRole(roleAdmin, secure, fn) }
+
+	mux.HandleFunc("/login", webLoginPage)
+	mux.HandleFunc("/api/login", webLogin(config, secure))
+	mux.HandleFunc("/api/logout", ro(webLogout))
+	mux.HandleFunc("/api/me", ro(webMe))
+
+	mux.HandleFunc("/", ro(h(webIndex)))
+	mux.HandleFunc("/api/reports", ro(h(webListReports)))
+	mux.HandleFunc("/api/report/", ro(h(webGetReport)))
+	mux.HandleFunc("/api/compare", ro(h(webCompare)))
+	mux.HandleFunc("/api/quickcompare", ro(h(webQuickCompare)))
+	mux.HandleFunc("/api/status", ro(h(webStatus)))
+	mux.HandleFunc("/api/hosts", ro(h(webHosts)))
+	mux.HandleFunc("/api/hosts/pingall", ro(h(webPingAll)))
+	mux.HandleFunc("/api/remote", ro(h(webRemote)))             // per-command role check inside
+	mux.HandleFunc("/api/hosts/remoteall", ro(h(webRemoteAll))) // per-command role check inside
+
+	mux.HandleFunc("/api/scan", rw(h(webScan)))
+	mux.HandleFunc("/api/agent/start", rw(h(webAgentStart)))
+	mux.HandleFunc("/api/agent/stop", rw(webAgentStop))
+	mux.HandleFunc("/api/hosts/sync", rw(h(webSyncAll)))
+	mux.HandleFunc("/api/hosts/start", rw(h(webStartAll)))
+
+	mux.HandleFunc("/api/users", admin(h(webUsers)))
+
+	if created, err := ensureDefaultUser(config.usersDB); err != nil {
+		fmt.Println("ERROR - users file:", err)
+		return
+	} else if created {
+		fmt.Printf("Created %s with the default user %q / %q - change it after logging in\n", config.usersDB, defaultAdminUser, defaultAdminPassword)
+	}
+	if usingDefaultPassword(config.usersDB) {
+		fmt.Printf("WARNING - user %q still has the default password\n", defaultAdminUser)
+	}
 
 	addr := config.webHost + ":" + config.webPort
-	fmt.Printf("Web GUI listening on http://%s\n", addr)
-	if err := http.ListenAndServe(addr, mux); err != nil {
+	srv := &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
+	if !config.webTLS {
+		fmt.Printf("Web GUI listening on http://%s (webTLS=false: passwords travel in clear text, keep this on localhost)\n", addr)
+		if err := srv.ListenAndServe(); err != nil {
+			fmt.Println("ERROR - web GUI:", err)
+		}
+		return
+	}
+	cert, created, err := loadOrCreateAgentCert(config.agentCert, config.agentKey)
+	if err != nil {
+		fmt.Println("ERROR - web GUI TLS certificate:", err)
+		return
+	}
+	if created {
+		fmt.Printf("Generated TLS certificate %s (private key %s)\n", config.agentCert, config.agentKey)
+	}
+	srv.TLSConfig = agentTLSConfig(cert)
+	fmt.Printf("Web GUI listening on https://%s (self-signed certificate, fingerprint %s)\n", addr, certFingerprint(cert.Certificate[0]))
+	if err := srv.ListenAndServeTLS("", ""); err != nil {
 		fmt.Println("ERROR - web GUI:", err)
 	}
+}
+
+// webRoleFor returns the role of the logged-in user for the request.
+func webRoleFor(r *http.Request) (string, string) {
+	ses, _ := currentSession(r)
+	return ses.user, ses.role
 }
 
 // ── tiny helpers ──────────────────────────────────────────────────────────────
@@ -85,12 +136,18 @@ func webIndex(config configInfo, w http.ResponseWriter, r *http.Request) {
 	}
 	tmpl := template.Must(template.New("p").Parse(webHTML))
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	user, role := webRoleFor(r)
 	tmpl.Execute(w, map[string]string{ //nolint:errcheck
+		"User":       user,
+		"Role":       role,
 		"Path":       config.path,
 		"ReportName": config.reportName,
 		"ReportDir":  config.reportDir,
 		"AgentHost":  config.agentHost,
 		"AgentPort":  config.agentPort,
+		"AgentUser":  config.agentUser,
+		"AgentPass":  config.agentPassword,
+		"UsersDB":    config.usersDB,
 	})
 }
 
@@ -111,8 +168,8 @@ func webListReports(config configInfo, w http.ResponseWriter, r *http.Request) {
 
 func webGetReport(config configInfo, w http.ResponseWriter, r *http.Request) {
 	id := strings.TrimPrefix(r.URL.Path, "/api/report/")
-	if id == "" {
-		wErr(w, "missing report ID", 400)
+	if !validReportID(id) {
+		wErr(w, "missing or invalid report ID", 400)
 		return
 	}
 	wJSON(w, map[string]string{"output": listReportDataString(config, id)})
@@ -150,10 +207,17 @@ func webScan(config configInfo, w http.ResponseWriter, r *http.Request) {
 	state.mu.Unlock()
 
 	go func() {
-		callScan(c)
-		state.mu.Lock()
-		state.scanRunning = false
-		state.mu.Unlock()
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Println("ERROR - web scan panicked:", r)
+			}
+			state.mu.Lock()
+			state.scanRunning = false
+			state.mu.Unlock()
+		}()
+		if err := callScan(c); err != nil {
+			fmt.Println("ERROR - web scan:", err)
+		}
 	}()
 
 	wJSON(w, map[string]bool{"started": true})
@@ -169,8 +233,8 @@ func webCompare(config configInfo, w http.ResponseWriter, r *http.Request) {
 		ReportDir string `json:"reportDir"`
 	}
 	wDecode(r, &req) //nolint:errcheck
-	if req.Older == "" || req.Newer == "" {
-		wErr(w, "older and newer required", 400)
+	if !validReportID(req.Older) || !validReportID(req.Newer) {
+		wErr(w, "older and newer required (valid report IDs)", 400)
 		return
 	}
 	c := config
@@ -280,20 +344,54 @@ func webAgentStop(w http.ResponseWriter, r *http.Request) {
 	wJSON(w, map[string]string{"msg": "Agent stop signal sent"})
 }
 
-func webRemote(w http.ResponseWriter, r *http.Request) {
+func webRemote(config configInfo, w http.ResponseWriter, r *http.Request) {
 	if !requirePost(w, r) {
 		return
 	}
 	var req struct {
-		Host string   `json:"host"`
-		Port string   `json:"port"`
-		Cmd  []string `json:"cmd"`
+		Host     string   `json:"host"`
+		Port     string   `json:"port"`
+		User     string   `json:"user"`
+		Password string   `json:"password"`
+		Cmd      []string `json:"cmd"`
 	}
 	if err := wDecode(r, &req); err != nil || req.Host == "" || req.Port == "" || len(req.Cmd) == 0 {
 		wErr(w, "host, port, and cmd required", 400)
 		return
 	}
-	wJSON(w, map[string]string{"output": runRemoteCommandToString(req.Host, req.Port, req.Cmd)})
+	if _, role := webRoleFor(r); !roleAllows(role, commandRole(req.Cmd)) {
+		wErr(w, "permission denied: '"+req.Cmd[0]+"' requires the "+commandRole(req.Cmd)+" role (you are "+role+")", http.StatusForbidden)
+		return
+	}
+	c := config
+	if req.User != "" {
+		c.agentUser = req.User
+	}
+	if req.Password != "" {
+		c.agentPassword = req.Password
+	}
+	wJSON(w, map[string]string{"output": runRemoteCommandToString(c, req.Host, req.Port, req.Cmd)})
+}
+
+// webUsers manages the local users file: {"args":["add","bob","password"]}.
+// Remote agents' users are managed through /api/remote with cmd ["user", ...].
+func webUsers(config configInfo, w http.ResponseWriter, r *http.Request) {
+	if !requirePost(w, r) {
+		return
+	}
+	var req struct {
+		UsersDB string   `json:"usersDB"`
+		Args    []string `json:"args"`
+	}
+	if err := wDecode(r, &req); err != nil || len(req.Args) == 0 {
+		wErr(w, "args required", 400)
+		return
+	}
+	path := config.usersDB
+	if req.UsersDB != "" {
+		path = req.UsersDB
+	}
+	wJSON(w, map[string]string{"output": userCommand(path, req.Args)})
 }
 
 func webHosts(config configInfo, w http.ResponseWriter, r *http.Request) {
@@ -326,24 +424,7 @@ func webPingAll(config configInfo, w http.ResponseWriter, r *http.Request) {
 		wErr(w, err.Error(), 500)
 		return
 	}
-	res := make([]hostResult, len(hosts))
-	var wg sync.WaitGroup
-	for i, h := range hosts {
-		wg.Add(1)
-		go func(idx int, host remoteHost) {
-			defer wg.Done()
-			out := runRemoteCommandToString(host.address, host.port, []string{"status"})
-			res[idx] = hostResult{alias: host.alias, output: strings.TrimSpace(out)}
-		}(i, h)
-	}
-	wg.Wait()
-	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("%-18s %s\n", "ALIAS", "STATUS"))
-	sb.WriteString(strings.Repeat("-", 45) + "\n")
-	for _, rr := range res {
-		sb.WriteString(fmt.Sprintf("%-18s %s\n", rr.alias, rr.output))
-	}
-	wJSON(w, map[string]string{"output": sb.String()})
+	wJSON(w, map[string]string{"output": pingAllString(config, hosts)})
 }
 
 func webSyncAll(config configInfo, w http.ResponseWriter, r *http.Request) {
@@ -384,26 +465,16 @@ func webRemoteAll(config configInfo, w http.ResponseWriter, r *http.Request) {
 		wErr(w, "cmd required", 400)
 		return
 	}
+	if _, role := webRoleFor(r); !roleAllows(role, commandRole(req.Cmd)) {
+		wErr(w, "permission denied: '"+req.Cmd[0]+"' requires the "+commandRole(req.Cmd)+" role (you are "+role+")", http.StatusForbidden)
+		return
+	}
 	hosts, err := parseHostsConfig(config.hostsConfig)
 	if err != nil {
 		wErr(w, err.Error(), 500)
 		return
 	}
-	res := make([]hostResult, len(hosts))
-	var wg sync.WaitGroup
-	for i, h := range hosts {
-		wg.Add(1)
-		go func(idx int, host remoteHost) {
-			defer wg.Done()
-			res[idx] = hostResult{alias: host.alias, output: runRemoteCommandToString(host.address, host.port, req.Cmd)}
-		}(i, h)
-	}
-	wg.Wait()
-	var sb strings.Builder
-	for _, rr := range res {
-		sb.WriteString(fmt.Sprintf("=== %s ===\n%s\n", rr.alias, rr.output))
-	}
-	wJSON(w, map[string]string{"output": sb.String()})
+	wJSON(w, map[string]string{"output": remoteAllString(config, hosts, req.Cmd)})
 }
 
 // ── embedded single-page HTML app ─────────────────────────────────────────────
@@ -464,6 +535,9 @@ tr.sel td{background:#1a2a1a;color:#4ade80}
   <h1>&#x1F512; ship-grip-fim</h1>
   <span class="sub">File Integrity Monitor</span>
   <span id="gst" class="bdg bi">idle</span>
+  <span class="sep" style="flex:1"></span>
+  <span class="sub">{{index . "User"}} ({{index . "Role"}})</span>
+  <button class="btn s" onclick="logout()">Log out</button>
 </header>
 <div class="tabs">
   <button class="tb on"  onclick="tab('local',this)">Local</button>
@@ -471,6 +545,7 @@ tr.sel td{background:#1a2a1a;color:#4ade80}
   <button class="tb"     onclick="tab('remote',this)">Remote</button>
   <button class="tb"     onclick="tab('hosts',this)">Hosts</button>
   <button class="tb"     onclick="tab('sched',this)">Schedule</button>
+  <button class="tb"     data-need="admin" onclick="tab('users',this)">Users</button>
 </div>
 
 <!-- ── LOCAL ─────────────────────────────────────────────────────── -->
@@ -482,7 +557,7 @@ tr.sel td{background:#1a2a1a;color:#4ade80}
       <label>Report&nbsp;Dir</label><input id="ldir"  class="inp inp-md" value="{{index . "ReportDir"}}">
     </div>
     <div class="row mt">
-      <button class="btn g" id="lscanbtn" onclick="lScan()">&#x25B6; Scan</button>
+      <button class="btn g" id="lscanbtn" data-need="rw" onclick="lScan()">&#x25B6; Scan</button>
       <button class="btn y" onclick="lQC()">&#x26A1; Quick Compare</button>
       <button class="btn s" onclick="lLoad()">&#x27F3; Refresh</button>
       <span class="sep"></span>
@@ -519,8 +594,8 @@ tr.sel td{background:#1a2a1a;color:#4ade80}
     <div class="row">
       <label>Bind</label><input id="ahost" class="inp inp-sm" value="{{index . "AgentHost"}}">
       <label>Port</label><input id="aport" class="inp" style="width:65px" value="{{index . "AgentPort"}}">
-      <button class="btn g" id="abtn" onclick="aStart()">&#x25B6; Start Agent</button>
-      <button class="btn r" id="astop" onclick="aStop()" disabled>&#x25A0; Stop</button>
+      <button class="btn g" id="abtn" data-need="rw" onclick="aStart()">&#x25B6; Start Agent</button>
+      <button class="btn r" id="astop" data-need="rw" onclick="aStop()" disabled>&#x25A0; Stop</button>
       <span class="sep"></span>
       <span id="ast" class="bdg bs">stopped</span>
     </div>
@@ -538,9 +613,11 @@ tr.sel td{background:#1a2a1a;color:#4ade80}
     <div class="row">
       <label>Host</label><input id="rhost" class="inp inp-sm" value="localhost">
       <label>Port</label><input id="rport" class="inp" style="width:65px" value="{{index . "AgentPort"}}">
+      <label>User</label><input id="ruser" class="inp" style="width:80px" value="{{index . "AgentUser"}}">
+      <label>Pass</label><input id="rpass" class="inp" type="password" style="width:100px" value="{{index . "AgentPass"}}">
       <button class="btn s" onclick="rStat()">Status</button>
       <button class="btn s" onclick="rList()">&#x27F3; List</button>
-      <button class="btn g" onclick="rScan()">&#x25B6; Scan</button>
+      <button class="btn g" data-need="rw" onclick="rScan()">&#x25B6; Scan</button>
       <button class="btn y" onclick="rQC()">&#x26A1; Quick Compare</button>
       <span class="sep"></span>
       <span id="rst" class="bdg bi">—</span>
@@ -576,8 +653,8 @@ tr.sel td{background:#1a2a1a;color:#4ade80}
     <div class="row">
       <button class="btn s" onclick="hLoad()">&#x27F3; Refresh Hosts</button>
       <button class="btn s" onclick="hPing()">Ping All</button>
-      <button class="btn s" onclick="hSync()">Sync Reports</button>
-      <button class="btn s" onclick="hStart()">Start All (SSH)</button>
+      <button class="btn s" data-need="rw" onclick="hSync()">Sync Reports</button>
+      <button class="btn s" data-need="rw" onclick="hStart()">Start All (SSH)</button>
       <span class="sep"></span>
       <input id="hcmd" class="inp inp-md" placeholder="command  e.g. scan, list, status">
       <button class="btn g" onclick="hAll()">Run on All</button>
@@ -600,6 +677,8 @@ tr.sel td{background:#1a2a1a;color:#4ade80}
     <div class="row">
       <label>Agent</label><input id="shost" class="inp inp-sm" value="localhost">
       <label>Port</label><input id="sport" class="inp" style="width:65px" value="{{index . "AgentPort"}}">
+      <label>User</label><input id="suser" class="inp" style="width:80px" value="{{index . "AgentUser"}}">
+      <label>Pass</label><input id="spass" class="inp" type="password" style="width:100px" value="{{index . "AgentPass"}}">
       <button class="btn s" onclick="sLoad()">&#x27F3; Connect / Refresh</button>
       <span class="sep"></span>
       <span id="sst" class="bdg bi">—</span>
@@ -617,8 +696,8 @@ tr.sel td{background:#1a2a1a;color:#4ade80}
           <input id="sjn" class="inp" style="width:90px" placeholder="name">
           <input id="sjc" class="inp" style="width:105px" placeholder="@daily / 0 2 * * *">
           <input id="sjcmd" class="inp" style="width:55px" value="scan">
-          <button class="btn g" onclick="sAdd()">Add</button>
-          <button class="btn r" onclick="sDel()">Remove</button>
+          <button class="btn g" data-need="rw" onclick="sAdd()">Add</button>
+          <button class="btn r" data-need="rw" onclick="sDel()">Remove</button>
         </div>
       </div>
     </div>
@@ -635,6 +714,37 @@ tr.sel td{background:#1a2a1a;color:#4ade80}
   </div>
 </div>
 
+<!-- ── USERS ─────────────────────────────────────────────────────── -->
+<div id="users" class="pnl">
+  <div class="card">
+    <div class="row">
+      <label><input type="radio" name="utgt" value="local" checked> Local users file</label>
+      <input id="udb" class="inp inp-md" value="{{index . "UsersDB"}}">
+      <span class="sep"></span>
+      <label><input type="radio" name="utgt" value="remote"> Remote agent</label>
+      <input id="uhost" class="inp inp-sm" value="{{index . "AgentHost"}}" placeholder="host">
+      <input id="uport" class="inp" style="width:65px" value="{{index . "AgentPort"}}" placeholder="port">
+      <input id="uuser" class="inp" style="width:80px" value="{{index . "AgentUser"}}" placeholder="login user">
+      <input id="upass" class="inp" type="password" style="width:100px" value="{{index . "AgentPass"}}" placeholder="login password">
+    </div>
+    <div class="row mt">
+      <label>Name</label><input id="uname" class="inp inp-sm" placeholder="user name">
+      <label>New&nbsp;password</label><input id="unewpass" class="inp inp-sm" type="password" placeholder="min 8 chars">
+      <label>Role</label><select id="urole" class="inp"><option value="ro">ro</option><option value="rw">rw</option><option value="admin">admin</option></select>
+      <button class="btn s" onclick="uRun(['list'])">List Users</button>
+      <button class="btn g" onclick="uAct('add')">Add</button>
+      <button class="btn y" onclick="uAct('passwd')">Set Password</button>
+      <button class="btn y" onclick="uAct('role')">Set Role</button>
+      <button class="btn r" onclick="uAct('remove')">Remove</button>
+      <button class="btn s" onclick="clr('uout')">Clear</button>
+      <span class="sep"></span>
+      <span id="ust" class="bdg bi">&#8212;</span>
+    </div>
+    <div class="row mt" style="opacity:.75">Roles: ro = view/compare reports, rw = ro + scans and schedules, admin = rw + manage users. A fresh install has "admin" / "changeme" &#8212; change it first.</div>
+  </div>
+  <pre class="out" id="uout" style="flex:1"></pre>
+</div>
+
 <script>
 // ── tab switching ─────────────────────────────────────────────────────────
 function tab(id,b){
@@ -645,11 +755,13 @@ function tab(id,b){
 }
 
 // ── api ───────────────────────────────────────────────────────────────────
+function v(id){const e=document.getElementById(id);return e?e.value:'';}
 async function api(m,p,b){
   try{
     const o={method:m,headers:{'Content-Type':'application/json'}};
     if(b!==undefined)o.body=JSON.stringify(b);
     const r=await fetch(p,o);
+    if(r.status===401){location.href='/login';return{error:'login required'};}
     const t=await r.text();
     try{return JSON.parse(t);}catch{return{error:t};}
   }catch(e){return{error:e.message};}
@@ -659,6 +771,14 @@ async function api(m,p,b){
 function so(id,t){const e=document.getElementById(id);if(e){e.textContent=t||'';e.scrollTop=e.scrollHeight;}}
 function ao(id,t){const e=document.getElementById(id);if(e){e.textContent+=t;e.scrollTop=e.scrollHeight;}}
 function clr(id){so(id,'');}
+
+// ── safe table row (textContent, never innerHTML, since values come from
+//    config files and remote agents) ──────────────────────────────────────
+function rowOf(vals){
+  const tr=document.createElement('tr');
+  vals.forEach(v=>{const td=document.createElement('td');td.textContent=(v==null?'':v);tr.appendChild(td);});
+  return tr;
+}
 
 // ── badge ─────────────────────────────────────────────────────────────────
 function bdg(id,txt,cls){const e=document.getElementById(id);if(e){e.textContent=txt;e.className='bdg '+cls;}}
@@ -785,48 +905,48 @@ async function aStop(){
 // REMOTE TAB
 // ═══════════════════════════════════════════════════════════════════
 let rSel='';
-function rAddr(){return{host:document.getElementById('rhost').value,port:document.getElementById('rport').value};}
+function rAddr(){return{host:v('rhost'),port:v('rport'),user:v('ruser'),password:v('rpass')};}
 
 async function rStat(){
-  const{host,port}=rAddr();
-  const d=await api('POST','/api/remote',{host,port,cmd:['status']});
+  const{host,port,user,password}=rAddr();
+  const d=await api('POST','/api/remote',{host,port,user,password,cmd:['status']});
   bdg('rst',(d.output||d.error||'?').trim(),'bi');
 }
 async function rList(){
-  const{host,port}=rAddr();
+  const{host,port,user,password}=rAddr();
   bdg('rst','...','bi');
-  const d=await api('POST','/api/remote',{host,port,cmd:['list']});
+  const d=await api('POST','/api/remote',{host,port,user,password,cmd:['list']});
   const rpts=parseRpts(d.output);
   buildTbl('rrpts',rpts,r=>{rSel=r;},r=>{rDoView(r);});
   bdg('rst',rpts.length+' reports','bi');
 }
 async function rScan(){
-  const{host,port}=rAddr();
+  const{host,port,user,password}=rAddr();
   bdg('rst','scanning...','br');so('rout','Scan started on '+host+':'+port+'...\n');
-  const d=await api('POST','/api/remote',{host,port,cmd:['scan']});
+  const d=await api('POST','/api/remote',{host,port,user,password,cmd:['scan']});
   so('rout',d.output||d.error||'');bdg('rst','done','bi');
 }
 function rSOld(){if(rSel)document.getElementById('rold').value=rSel;}
 function rSNew(){if(rSel)document.getElementById('rnew').value=rSel;}
 function rView(){if(rSel)rDoView(rSel);}
 async function rDoView(id){
-  const{host,port}=rAddr();
-  const d=await api('POST','/api/remote',{host,port,cmd:['data',id]});
+  const{host,port,user,password}=rAddr();
+  const d=await api('POST','/api/remote',{host,port,user,password,cmd:['data',id]});
   so('rout',d.output||d.error||'');
 }
 async function rCmp(){
-  const{host,port}=rAddr();
+  const{host,port,user,password}=rAddr();
   const older=document.getElementById('rold').value.trim();
   const newer=document.getElementById('rnew').value.trim();
   if(!older||!newer){so('rout','Set Old and New report IDs first.');return;}
   bdg('rst','comparing...','br');
-  const d=await api('POST','/api/remote',{host,port,cmd:['compare',older,newer]});
+  const d=await api('POST','/api/remote',{host,port,user,password,cmd:['compare',older,newer]});
   so('rout',d.output||d.error||'');bdg('rst','done','bi');
 }
 async function rQC(){
-  const{host,port}=rAddr();
+  const{host,port,user,password}=rAddr();
   bdg('rst','quick compare...','br');so('rout','Finding last two reports on remote agent...');
-  const d=await api('POST','/api/remote',{host,port,cmd:['quickcompare']});
+  const d=await api('POST','/api/remote',{host,port,user,password,cmd:['quickcompare']});
   so('rout',d.output||d.error||'');bdg('rst','done','bi');
 }
 
@@ -838,8 +958,7 @@ async function hLoad(){
   const tb=document.getElementById('hhosts');
   tb.innerHTML='';
   (d.hosts||[]).forEach(h=>{
-    const tr=document.createElement('tr');
-    tr.innerHTML='<td>'+h.alias+'</td><td>'+h.address+'</td><td>'+h.port+'</td><td>'+h.path+'</td><td>'+h.reportName+'</td><td>'+(h.sshUser||'')+'</td>';
+    const tr=rowOf([h.alias,h.address,h.port,h.path,h.reportName,h.sshUser||'']);
     tb.appendChild(tr);
   });
   if(d.error)so('hout','ERROR: '+d.error);
@@ -873,43 +992,77 @@ async function hAll(){
 // SCHEDULE TAB
 // ═══════════════════════════════════════════════════════════════════
 let sSel='';
-function sAddr(){return{host:document.getElementById('shost').value,port:document.getElementById('sport').value};}
+function sAddr(){return{host:v('shost'),port:v('sport'),user:v('suser'),password:v('spass')};}
 
+// ── users tab ─────────────────────────────────────────────────────────────
+async function uRun(args){
+  const local=document.querySelector('input[name=utgt]:checked').value==='local';
+  bdg('ust','...','bi');
+  let d;
+  if(local){d=await api('POST','/api/users',{usersDB:v('udb'),args});}
+  else{d=await api('POST','/api/remote',{host:v('uhost'),port:v('uport'),user:v('uuser'),password:v('upass'),cmd:['user',...args]});}
+  const out=(d.output||d.error||'').trim();
+  so('uout',out);bdg('ust',out.startsWith('ERROR')?'error':'done',out.startsWith('ERROR')?'br':'bi');
+}
+function uAct(action){
+  const name=v('uname').trim();
+  if(!name){so('uout','Enter a user name first.');return;}
+  const args=[action,name];
+  if(action==='add'){args.push(v('unewpass'),v('urole'));}
+  else if(action==='passwd'){args.push(v('unewpass'));}
+  else if(action==='role'){args.push(v('urole'));}
+  uRun(args);
+}
+
+// ── login / roles ─────────────────────────────────────────────────────────
+const RANK={ro:1,rw:2,admin:3};
+async function logout(){await api('POST','/api/logout',{});location.href='/login';}
+async function applyRole(){
+  const me=await api('GET','/api/me');
+  const mine=RANK[me.role]||0;
+  document.querySelectorAll('[data-need]').forEach(el=>{
+    if(mine<RANK[el.dataset.need]){el.disabled=true;el.title='requires the '+el.dataset.need+' role';el.style.opacity=.4;}
+  });
+}
+applyRole();
+
+// The agent returns padded text tables.  Cron expressions and timestamps
+// contain spaces, so rows are matched by column shape rather than split on
+// whitespace (this also copes with long job names that eat the padding).
+const TS='\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}';
+const JOB_RE=new RegExp('^(\\S+)\\s+(.+?)\\s+(\\S+)\\s+('+TS+'|-)\\s*$');
+const HIST_RE=new RegExp('^(\\S+)\\s+('+TS+')\\s+('+TS+'|-)\\s+(.*?)\\s*$');
 function pJobs(raw){
   const rows=[];
-  const lines=(raw||'').split('\n');
-  for(let i=2;i<lines.length;i++){
-    const l=lines[i].trim();if(!l)continue;
-    const p=l.split(/\s{2,}/);
-    if(p.length>=4)rows.push({n:p[0].trim(),s:p[1].trim(),c:p[2].trim(),x:p.slice(3).join('  ').trim()});
-    else if(p.length===3)rows.push({n:p[0].trim(),s:p[1].trim(),c:p[2].trim(),x:'-'});
+  for(const line of (raw||'').split('\n')){
+    const m=JOB_RE.exec(line.trim());
+    if(!m||m[1]==='NAME')continue;
+    rows.push({n:m[1],s:m[2],c:m[3],x:m[4]});
   }
   return rows;
 }
 function pHist(raw){
   const rows=[];
-  const lines=(raw||'').split('\n');
-  for(let i=2;i<lines.length;i++){
-    const l=lines[i].trim();if(!l)continue;
-    const p=l.split(/\s{2,}/);
-    if(p.length>=4)rows.push({n:p[0].trim(),s:p[1].trim(),e:p[2].trim(),st:p.slice(3).join(' ').trim()});
+  for(const line of (raw||'').split('\n')){
+    const m=HIST_RE.exec(line.trim());
+    if(!m)continue;
+    rows.push({n:m[1],s:m[2],e:m[3],st:m[4]});
   }
   return rows;
 }
 
 async function sLoad(){
-  const{host,port}=sAddr();
+  const{host,port,user,password}=sAddr();
   bdg('sst','...','bi');
   const[jd,hd]=await Promise.all([
-    api('POST','/api/remote',{host,port,cmd:['schedule','list']}),
-    api('POST','/api/remote',{host,port,cmd:['schedule','history']})
+    api('POST','/api/remote',{host,port,user,password,cmd:['schedule','list']}),
+    api('POST','/api/remote',{host,port,user,password,cmd:['schedule','history']})
   ]);
   const jobs=pJobs(jd.output||'');
   const jtb=document.getElementById('sjobs');
   jtb.innerHTML='';
   jobs.forEach(j=>{
-    const tr=document.createElement('tr');
-    tr.innerHTML='<td>'+j.n+'</td><td>'+j.s+'</td><td>'+j.c+'</td><td>'+j.x+'</td>';
+    const tr=rowOf([j.n,j.s,j.c,j.x]);
     tr.onclick=()=>{jtb.querySelectorAll('tr').forEach(x=>x.classList.remove('sel'));tr.classList.add('sel');sSel=j.n;};
     jtb.appendChild(tr);
   });
@@ -917,25 +1070,24 @@ async function sLoad(){
   const htb=document.getElementById('shist');
   htb.innerHTML='';
   [...hist].reverse().forEach(h=>{
-    const tr=document.createElement('tr');
-    tr.innerHTML='<td>'+h.n+'</td><td>'+h.s+'</td><td>'+h.e+'</td><td>'+h.st+'</td>';
+    const tr=rowOf([h.n,h.s,h.e,h.st]);
     htb.appendChild(tr);
   });
   bdg('sst',jobs.length+' jobs','bi');
 }
 async function sAdd(){
-  const{host,port}=sAddr();
+  const{host,port,user,password}=sAddr();
   const n=document.getElementById('sjn').value.trim();
   const c=document.getElementById('sjc').value.trim();
   const cmd=document.getElementById('sjcmd').value.trim()||'scan';
   if(!n||!c){so('sout','Name and schedule are required.');return;}
-  const d=await api('POST','/api/remote',{host,port,cmd:['schedule','add',n+'|'+c+'|'+cmd]});
+  const d=await api('POST','/api/remote',{host,port,user,password,cmd:['schedule','add',n+'|'+c+'|'+cmd]});
   so('sout',d.output||d.error||'');sLoad();
 }
 async function sDel(){
   if(!sSel){so('sout','Select a job first.');return;}
-  const{host,port}=sAddr();
-  const d=await api('POST','/api/remote',{host,port,cmd:['schedule','remove',sSel]});
+  const{host,port,user,password}=sAddr();
+  const d=await api('POST','/api/remote',{host,port,user,password,cmd:['schedule','remove',sSel]});
   so('sout',d.output||d.error||'');sSel='';sLoad();
 }
 
